@@ -187,10 +187,6 @@
             <input type="checkbox" id="rigged-checkbox">
             <label for="rigged-checkbox">Постановочная игра</label>
         </div>
-        <div class="checkbox-row">
-            <input type="checkbox" id="arena-enhanced-checkbox">
-            <label for="arena-enhanced-checkbox">Улучшение арены (экспериментальное)</label>
-        </div>
         <div class="main-buttons">
             <button id="toggle-multi-mode-btn">Несколько игроков</button>
             <button id="game-settings-btn">Настройки игры</button>
@@ -220,6 +216,7 @@
         </div>
         <div id="avatar-url-group" class="form-group"><label for="modal-p-image-url">URL фото:</label><input type="text" id="modal-p-image-url" placeholder="https://example.com/photo.png"></div>
         <div id="avatar-file-group" class="form-group hidden"><label for="modal-p-image-file">Файл фото:</label><input type="file" id="modal-p-image-file" accept="image/*"></div>
+        <button id="open-unique-modal-btn" type="button" style="margin-bottom: 12px;">Уникальные настройки</button>
         <div class="sound-section">
             <h4>Свои звуки</h4>
             <div class="sound-row">
@@ -269,6 +266,10 @@
                 <div><label for="bg-gradient-1">Цвет 1:</label><input type="color" id="bg-gradient-1" value="#1f0033"></div>
                 <div><label for="bg-gradient-2">Цвет 2:</label><input type="color" id="bg-gradient-2" value="#002e4d"></div>
             </div>
+        </div>
+        <div class="checkbox-row" style="margin-top: 8px;">
+            <input type="checkbox" id="arena-enhanced-checkbox">
+            <label for="arena-enhanced-checkbox">Улучшение арены (экспериментальное)</label>
         </div>
         <button id="close-arena-modal-btn" style="margin-top: 20px;">Готово</button>
     </div>
@@ -1333,13 +1334,6 @@ function renderPlayersGrid() {
         btn.addEventListener('click', () => openPlayerModal(idx));
         wrap.appendChild(btn);
 
-        const uniqBtn = document.createElement('button');
-        uniqBtn.textContent = `Уникальные настройки`;
-        uniqBtn.dataset.idx = String(idx);
-        uniqBtn.style.marginTop = '8px';
-        uniqBtn.addEventListener('click', () => openUniqueModal(idx));
-        wrap.appendChild(uniqBtn);
-
         if (removable) {
             const rm = document.createElement('button');
             rm.className = 'remove-btn';
@@ -1422,6 +1416,11 @@ function openPlayerModal(idx) {
     document.getElementById('modal-p-damage-mix').checked = !!data.damageMixWithSystem;
 
     document.getElementById('player-modal').classList.remove('hidden');
+}
+
+function openUniqueModalForCurrentPlayer() {
+    if (currentPlayerEditing === null) return;
+    openUniqueModal(currentPlayerEditing);
 }
 
 async function saveAndClosePlayerModal() {
@@ -1815,6 +1814,7 @@ window.onload = async () => {
     document.getElementById('close-arena-modal-btn').addEventListener('click', () => arenaModal.classList.add('hidden'));
 
     document.getElementById('close-player-modal-btn').addEventListener('click', () => { saveAndClosePlayerModal(); });
+    document.getElementById('open-unique-modal-btn').addEventListener('click', () => { openUniqueModalForCurrentPlayer(); });
 
     document.getElementById('game-settings-btn').addEventListener('click', () => { applySettingsToSliders(); gameSettingsModal.classList.remove('hidden'); });
     document.getElementById('close-game-settings-btn').addEventListener('click', () => gameSettingsModal.classList.add('hidden'));
