@@ -21,6 +21,8 @@
             --accent-color-dark: #008c9e;
             --success-color: #28a745;
             --success-color-hover: #218838;
+            --danger-color: #dc3545;
+            --danger-color-hover: #c82333;
         }
         html, body { 
             background-color: var(--bg-color); 
@@ -28,12 +30,13 @@
             font-family: Arial, sans-serif; 
             display: flex; 
             justify-content: center; 
-            align-items: center; 
+            align-items: flex-start; 
             height: 100%; 
             width: 100%;
             margin: 0; 
-            overflow: hidden;
-            touch-action: none;
+            overflow-x: hidden;
+            overflow-y: auto;
+            touch-action: pan-y;
         }
         #setup-screen { 
             background-color: var(--surface-color); 
@@ -41,9 +44,10 @@
             border-radius: 10px; 
             box-shadow: 0 0 20px rgba(0,0,0,0.5); 
             width: 100%; 
-            max-width: 700px; 
+            max-width: 800px; 
             margin: 20px; 
             text-align: center; 
+            box-sizing: border-box;
         }
         #game-container { 
             display: none;
@@ -57,26 +61,36 @@
         h3 { margin-bottom: 25px; }
 
         .main-layout { display: flex; flex-direction: column; align-items: center; gap: 20px; }
-        .player-previews { display: flex; justify-content: space-around; gap: 30px; flex-wrap: wrap; width: 100%; }
-        .player-preview-area { flex: 1; min-width: 250px; text-align: center; }
+        .mode-indicator { color: var(--secondary-text); font-size: 14px; margin-top: -15px; }
+        .player-previews { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; width: 100%; }
+        .player-preview-area { flex: 0 0 220px; max-width: 220px; text-align: center; position: relative; }
+        .player-preview-area .remove-btn { position: absolute; top: 0; right: 0; width: 32px; height: 32px; padding: 0; font-size: 20px; line-height: 1; background-color: var(--danger-color); border-radius: 50%; }
+        .player-preview-area .remove-btn:hover { background-color: var(--danger-color-hover); }
         .preview-canvas { background-color: #0a0a0a; border-radius: 8px; margin: 0 auto 15px auto; display: block; }
         
-        .main-buttons { display: flex; flex-direction: column; width: 80%; max-width: 350px; gap: 15px; margin-top: 20px; }
+        .multi-controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+        .multi-controls button { width: auto; padding: 10px 18px; font-size: 14px; }
+        
+        .main-buttons { display: flex; flex-direction: column; width: 80%; max-width: 380px; gap: 12px; margin-top: 20px; }
         button { width: 100%; padding: 12px 20px; font-size: 18px; color: white; background-color: var(--accent-color-dark); border: none; border-radius: 5px; cursor: pointer; transition: background-color 0.3s; }
         button:hover { background-color: var(--accent-color); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.danger { background-color: var(--danger-color); }
+        button.danger:hover { background-color: var(--danger-color-hover); }
         button#start-game-btn { background-color: var(--success-color); font-size: 20px; padding: 15px; }
         button#start-game-btn:hover { background-color: var(--success-color-hover); }
 
         .info { font-size: 12px; color: #aaa; margin-top: 15px; text-align: center; }
         .hidden { display: none !important; }
         
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 1000; }
-        .modal-content { background: var(--surface-color); padding: 30px; border-radius: 10px; box-shadow: 0 5px 25px rgba(0,0,0,0.5); width: 90%; max-width: 500px; border: 1px solid var(--border-color); }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 20px; box-sizing: border-box; overflow-y: auto; }
+        .modal-content { background: var(--surface-color); padding: 25px; border-radius: 10px; box-shadow: 0 5px 25px rgba(0,0,0,0.5); width: 100%; max-width: 520px; border: 1px solid var(--border-color); max-height: calc(100vh - 40px); overflow-y: auto; box-sizing: border-box; }
         
         .form-group { margin-bottom: 20px; text-align: left; }
         .form-group:last-of-type { margin-bottom: 0; }
         label { display: block; margin-bottom: 8px; color: var(--secondary-text); }
-        input[type="text"], input[type="color"], input[type="file"] { box-sizing: border-box; width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #555; background-color: var(--input-bg); color: white; font-size: 16px; }
+        input[type="text"], input[type="number"], input[type="color"], input[type="file"] { box-sizing: border-box; width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #555; background-color: var(--input-bg); color: white; font-size: 16px; }
+        select { box-sizing: border-box; width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #555; background-color: var(--input-bg); color: white; font-size: 16px; }
         input[type="color"] { padding: 2px; height: 45px; cursor: pointer; }
         input[type="file"] { font-size: 14px; }
         .color-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
@@ -92,36 +106,70 @@
         .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
         input:checked + .slider { background-color: var(--accent-color); }
         input:checked + .slider:before { transform: translateX(26px); }
+
+        .checkbox-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+        .checkbox-row input[type="checkbox"] { width: 20px; height: 20px; cursor: pointer; flex-shrink: 0; }
+        .checkbox-row label { display: inline; margin: 0; cursor: pointer; color: var(--primary-text); font-size: 15px; }
+
+        .range-row { margin-bottom: 16px; text-align: left; }
+        .range-row .range-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; gap: 10px; }
+        .range-row .range-name { color: var(--secondary-text); font-size: 14px; }
+        .range-row .range-value { color: var(--accent-color); font-weight: bold; min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; font-size: 14px; }
+        .range-row input[type="range"] { width: 100%; cursor: pointer; }
+
+        .sound-section { border-top: 1px solid var(--border-color); padding-top: 15px; margin-top: 20px; }
+        .sound-section h4 { margin: 0 0 12px 0; color: var(--accent-color); font-size: 16px; }
+        .sound-row { margin-bottom: 16px; padding: 10px; background-color: rgba(0,0,0,0.15); border-radius: 6px; }
+        .sound-row > label { font-size: 14px; color: var(--secondary-text); margin-bottom: 6px; }
+        .sound-row .sound-meta { font-size: 12px; color: #888; margin-top: 6px; word-break: break-all; }
+        .sound-row .sound-controls { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+        .sound-row .sound-controls button { padding: 6px 10px; font-size: 12px; width: auto; }
+        .sound-row .checkbox-row { padding-top: 8px; }
+
+        .modal-buttons { display: flex; gap: 10px; margin-top: 20px; }
+        .modal-buttons button { flex: 1; }
+
+        #simulation-overlay .modal-content { text-align: center; max-width: 420px; }
+        #sim-counter { color: var(--accent-color); font-size: 36px; font-weight: bold; display: inline-block; margin: 10px 0; font-variant-numeric: tabular-nums; }
+        .sim-spinner { display: inline-block; width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.1); border-top-color: var(--accent-color); border-radius: 50%; animation: sim-spin 0.8s linear infinite; margin-bottom: 10px; }
+        @keyframes sim-spin { to { transform: rotate(360deg); } }
+
+        #countdown-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; z-index: 2000; pointer-events: none; background: rgba(0,0,0,0.4); }
+        #countdown-num { color: var(--accent-color); font-size: clamp(120px, 30vw, 280px); font-weight: bold; text-shadow: 0 0 40px rgba(0,188,212,0.8); }
+        #countdown-num.anim { animation: countdownAnim 1s ease-in-out forwards; }
+        @keyframes countdownAnim {
+            0% { transform: scale(0.5); opacity: 0; }
+            25% { transform: scale(1.2); opacity: 1; }
+            70% { transform: scale(1.0); opacity: 1; }
+            100% { transform: scale(0.7); opacity: 0; }
+        }
+
+        .winner-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .winner-option { padding: 8px 14px; border-radius: 5px; background-color: var(--input-bg); border: 2px solid var(--input-bg); cursor: pointer; transition: border-color 0.2s, background-color 0.2s; font-size: 14px; user-select: none; }
+        .winner-option:hover { border-color: var(--accent-color-dark); }
+        .winner-option.selected { border-color: var(--accent-color); background-color: rgba(0,188,212,0.18); }
+
+        .indented { margin-left: 30px; padding-left: 12px; border-left: 2px solid var(--border-color); }
     </style>
 </head>
 <body>
 
-<!-- Data Storage (Hidden) -->
-<div id="player-data-storage" class="hidden">
-    <input type="text" id="p1-name" value="Игрок 1">
-    <input type="color" id="p1-color-picker" value="#DC3232">
-    <input type="text" id="p1-image-url">
-    <input type="file" id="p1-image-file" accept="image/*">
-    <input type="text" id="p2-name" value="Игрок 2">
-    <input type="color" id="p2-color-picker" value="#4169E1">
-    <input type="text" id="p2-image-url">
-    <input type="file" id="p2-image-file" accept="image/*">
-</div>
-
 <div id="setup-screen">
     <div class="main-layout">
         <h1>BALLS BATTLE</h1>
-        <div class="player-previews">
-            <div class="player-preview-area">
-                <canvas id="p1-preview-canvas" class="preview-canvas" width="180" height="180"></canvas>
-                <button id="p1-settings-btn">Настроить</button>
-            </div>
-            <div class="player-preview-area">
-                <canvas id="p2-preview-canvas" class="preview-canvas" width="180" height="180"></canvas>
-                <button id="p2-settings-btn">Настроить</button>
-            </div>
+        <div id="mode-indicator" class="mode-indicator">Режим: Стандарт (2 игрока)</div>
+        <div id="players-grid" class="player-previews"></div>
+        <div id="multi-controls" class="multi-controls hidden">
+            <button id="add-player-btn">+ Добавить игрока</button>
+            <button id="remove-player-btn" class="danger">− Убрать игрока</button>
+        </div>
+        <div class="checkbox-row">
+            <input type="checkbox" id="rigged-checkbox">
+            <label for="rigged-checkbox">Постановочная игра</label>
         </div>
         <div class="main-buttons">
+            <button id="toggle-multi-mode-btn">Несколько игроков</button>
+            <button id="game-settings-btn">Настройки игры</button>
             <button id="arena-settings-btn">Настроить арену</button>
             <button id="start-game-btn">Начать игру</button>
         </div>
@@ -148,6 +196,33 @@
         </div>
         <div id="avatar-url-group" class="form-group"><label for="modal-p-image-url">URL фото:</label><input type="text" id="modal-p-image-url" placeholder="https://example.com/photo.png"></div>
         <div id="avatar-file-group" class="form-group hidden"><label for="modal-p-image-file">Файл фото:</label><input type="file" id="modal-p-image-file" accept="image/*"></div>
+        <div class="sound-section">
+            <h4>Свои звуки</h4>
+            <div class="sound-row">
+                <label>Звук атаки (когда игрок получает пилу):</label>
+                <div class="sound-controls">
+                    <input type="file" id="modal-p-attack-sound" accept="audio/*" style="flex:1;">
+                    <button type="button" id="modal-p-attack-sound-clear" class="danger">Удалить</button>
+                </div>
+                <div class="sound-meta" id="modal-p-attack-sound-meta">Файл не выбран</div>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="modal-p-attack-mix">
+                    <label for="modal-p-attack-mix">Проигрывать вместе с системным</label>
+                </div>
+            </div>
+            <div class="sound-row">
+                <label>Звук получения урона:</label>
+                <div class="sound-controls">
+                    <input type="file" id="modal-p-damage-sound" accept="audio/*" style="flex:1;">
+                    <button type="button" id="modal-p-damage-sound-clear" class="danger">Удалить</button>
+                </div>
+                <div class="sound-meta" id="modal-p-damage-sound-meta">Файл не выбран</div>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="modal-p-damage-mix">
+                    <label for="modal-p-damage-mix">Проигрывать вместе с системным</label>
+                </div>
+            </div>
+        </div>
         <button id="close-player-modal-btn" style="margin-top: 20px;">Готово</button>
     </div>
 </div>
@@ -175,6 +250,88 @@
     </div>
 </div>
 
+<!-- Game Settings Modal (sliders) -->
+<div id="game-settings-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3>Настройки игры</h3>
+        <div class="range-row">
+            <div class="range-header"><span class="range-name">Размер шариков</span><span class="range-value" id="gs-ball-size-val">×1.00</span></div>
+            <input type="range" id="gs-ball-size" min="0.3" max="2.5" step="0.05" value="1">
+        </div>
+        <div class="range-row">
+            <div class="range-header"><span class="range-name">Частота спавна сердец</span><span class="range-value" id="gs-heart-freq-val">×1.00</span></div>
+            <input type="range" id="gs-heart-freq" min="0.1" max="3" step="0.05" value="1">
+        </div>
+        <div class="range-row">
+            <div class="range-header"><span class="range-name">Частота спавна пил</span><span class="range-value" id="gs-saw-freq-val">×1.00</span></div>
+            <input type="range" id="gs-saw-freq" min="0.1" max="3" step="0.05" value="1">
+        </div>
+        <div class="range-row">
+            <div class="range-header"><span class="range-name">Скорость шариков</span><span class="range-value" id="gs-ball-speed-val">×1.00</span></div>
+            <input type="range" id="gs-ball-speed" min="0.3" max="3" step="0.05" value="1">
+        </div>
+        <div class="range-row">
+            <div class="range-header"><span class="range-name">Скорость сужения поля</span><span class="range-value" id="gs-shrink-speed-val">×1.00</span></div>
+            <input type="range" id="gs-shrink-speed" min="0.1" max="5" step="0.05" value="1">
+        </div>
+        <div class="modal-buttons">
+            <button id="reset-game-settings-btn" class="danger">Сбросить</button>
+            <button id="close-game-settings-btn">Готово</button>
+        </div>
+    </div>
+</div>
+
+<!-- Rigged Settings Modal -->
+<div id="rigged-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3>Постановочная игра</h3>
+        <div class="form-group">
+            <label for="rg-min-time">Минимальное время (сек):</label>
+            <input type="number" id="rg-min-time" min="5" max="600" step="1" value="30">
+        </div>
+        <div class="form-group">
+            <label for="rg-max-time">Максимальное время (сек):</label>
+            <input type="number" id="rg-max-time" min="5" max="600" step="1" value="120">
+        </div>
+        <div class="form-group">
+            <label>Победитель:</label>
+            <div class="winner-options" id="rg-winner-options"></div>
+        </div>
+        <div class="checkbox-row">
+            <input type="checkbox" id="rg-comeback">
+            <label for="rg-comeback">Камбек (победитель опускался до низкого HP)</label>
+        </div>
+        <div id="rg-comeback-group" class="indented hidden">
+            <div class="range-row" style="margin-top: 10px;">
+                <div class="range-header"><span class="range-name">Минимальный уровень HP победителя</span><span class="range-value" id="rg-comeback-hp-val">1</span></div>
+                <input type="range" id="rg-comeback-hp" min="1" max="4" step="1" value="1">
+            </div>
+        </div>
+        <div class="modal-buttons">
+            <button id="cancel-rigged-btn" class="danger">Отмена</button>
+            <button id="save-rigged-btn">Готово</button>
+        </div>
+    </div>
+</div>
+
+<!-- Simulation Overlay -->
+<div id="simulation-overlay" class="modal-overlay hidden">
+    <div class="modal-content">
+        <div class="sim-spinner"></div>
+        <h3>Поиск подходящей игры…</h3>
+        <p style="margin: 10px 0;">Просчитано игр:</p>
+        <span id="sim-counter">0</span>
+        <div class="modal-buttons">
+            <button id="cancel-sim-btn" class="danger">Отмена</button>
+        </div>
+    </div>
+</div>
+
+<!-- Countdown Overlay -->
+<div id="countdown-overlay" class="hidden">
+    <div id="countdown-num">3</div>
+</div>
+
 <div id="game-container"><canvas id="game-canvas"></canvas></div>
 
 <script>
@@ -193,48 +350,100 @@ const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
 
 const AudioContext = window.AudioContext || window.webkitAudioContext;
-let audioCtx; 
+let audioCtx;
 
 let wakeLock = null;
 
+// === Seedable PRNG (Mulberry32) ===
+function mulberry32(seed) {
+    let s = (seed >>> 0) || 1;
+    return function() {
+        s = (s + 0x6D2B79F5) | 0;
+        let t = s;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+let gameRng = Math.random; // active RNG used by gameplay code
+function setGameSeed(seed) { gameRng = mulberry32(seed); }
+function clearGameSeed() { gameRng = Math.random; }
+function rng() { return gameRng(); }
+
 let allSounds = {}, backgroundSettings = {};
-// ИЗМЕНЕНО: Глобальные переменные для хранения загруженных картинок (raw_saw_img, raw_heart_img)
-let player1, player2, raw_saw_img, raw_heart_img;
+let raw_saw_img, raw_heart_img;
+// players[] holds active Ball instances during a game
+let players = [];
 let particles_list = [], powerups = [];
 let saw_on_map = false, heart_on_map = false;
 let saw_spawn_timer, heart_spawn_timer;
-let game_over = false, winner = null, loser = null;
+let game_over = false, winner = null;
 let running = false;
-let game_start_time, screen_shake = 0, gameOverTime = null;
+let game_frame = 0; // logical frame counter for deterministic simulation
+let last_time = 0, screen_shake = 0, gameOverTime = null;
+
+// Player configurations (UI side). Each entry: {name, color, imageUrl, imageFile, previewImage,
+//   attackSoundFile, attackSoundBuffer, attackMixWithSystem,
+//   damageSoundFile, damageSoundBuffer, damageMixWithSystem }
+let playersData = [];
+let multiPlayerMode = false; // false = standard 2 players, true = N players
+const MULTI_DEFAULT_COUNT = 4;
+const MIN_PLAYERS = 2;
+
+// Game settings (sliders). Defaults are 1.0 — current behaviour preserved.
+const DEFAULT_GAME_SETTINGS = {
+    ballSize: 1.0,
+    heartSpawnFreq: 1.0,
+    sawSpawnFreq: 1.0,
+    ballSpeed: 1.0,
+    arenaShrinkSpeed: 1.0
+};
+let gameSettings = Object.assign({}, DEFAULT_GAME_SETTINGS);
+
+// Rigged game settings
+let riggedSettings = {
+    enabled: false,
+    minTime: 30,
+    maxTime: 120,
+    winnerIndex: 0,
+    comeback: false,
+    comebackHp: 1
+};
+let simulationActive = false, simulationCancelled = false;
 
 const mainMenuButton = { rect: { x: 0, y: 0, width: 280, height: 60 }, text: "В главное меню", visible: false, alpha: 0 };
 
-const PRESET_COLORS = { 
-    "Красный": "#DC3232", "Оранжевый": "#FF8C00", "Желтый": "#FFD700", "Зеленый": "#32CD32", 
+const PRESET_COLORS = {
+    "Красный": "#DC3232", "Оранжевый": "#FF8C00", "Желтый": "#FFD700", "Зеленый": "#32CD32",
     "Голубой": "#00BFFF", "Синий": "#4169E1", "Фиолетовый": "#9400D3", "Розовый": "#FF69B4", "Серый": "#808080"
 };
+const DEFAULT_PLAYER_COLORS = ["#DC3232", "#4169E1", "#32CD32", "#FF8C00", "#9400D3", "#FFD700", "#FF69B4", "#00BFFF", "#808080", "#FF4500"];
 
 // --- КЛАССЫ ---
 class Vector2 { constructor(x = 0, y = 0) { this.x = x; this.y = y; } add(v) { return new Vector2(this.x + v.x, this.y + v.y); } subtract(v) { return new Vector2(this.x - v.x, this.y - v.y); } multiply(s) { return new Vector2(this.x * s, this.y * s); } length() { return Math.sqrt(this.x * this.x + this.y * this.y); } normalize() { const l = this.length(); return l > 0 ? new Vector2(this.x / l, this.y / l) : new Vector2(); } distanceTo(v) { return this.subtract(v).length(); } dot(v) { return this.x * v.x + this.y * v.y; } rotate_rad(rad) { const cos = Math.cos(rad); const sin = Math.sin(rad); return new Vector2(this.x * cos - this.y * sin, this.x * sin + this.y * cos); } }
 class Particle { constructor(x, y, colors, count, min_speed, max_speed, gravity, lifetime_range, size_range) { this.particles = []; for (let i = 0; i < count; i++) { const angle = Math.random() * 2 * Math.PI; const speed = min_speed + Math.random() * (max_speed - min_speed); this.particles.push({ pos: new Vector2(x, y), vel: new Vector2(Math.cos(angle) * speed, Math.sin(angle) * speed), life: lifetime_range[0] + Math.random() * (lifetime_range[1] - lifetime_range[0]), max_life: lifetime_range[1], color: colors[Math.floor(Math.random() * colors.length)], size: size_range[0] + Math.random() * (size_range[1] - size_range[0]) }); } this.gravity = gravity; } update() { for (const p of this.particles) { p.pos = p.pos.add(p.vel); p.vel.y += this.gravity; p.life -= 1; } this.particles = this.particles.filter(p => p.life > 0); } draw(surface) { surface.globalCompositeOperation = 'lighter'; for (const p of this.particles) { const alpha = p.life / p.max_life; if (alpha <= 0) continue; const size = p.size * alpha; if (size < 1) continue; surface.fillStyle = p.color; surface.globalAlpha = alpha; surface.beginPath(); surface.arc(p.pos.x, p.pos.y, size, 0, 2 * Math.PI); surface.fill(); } surface.globalAlpha = 1.0; surface.globalCompositeOperation = 'source-over'; } }
 class PowerUp { constructor(x, y, type) { this.type = type; const size = this.type === 'heart' ? 35 : 40; this.rect = { x: x, y: y, width: size, height: size }; this.image = type === 'saw' ? raw_saw_img : raw_heart_img; this.angle = 0; this.pulse_phase = 0; this.pulse_timer = Math.floor(Math.random() * 45); } update() { if (this.type === 'saw') { this.angle -= 12; } else { this.pulse_timer -= 1; if (this.pulse_timer <= 0) { this.pulse_timer = 0.75 * FPS; if (this.pulse_phase <= 0) this.pulse_phase = Math.PI; } if (this.pulse_phase > 0) { this.pulse_phase -= 0.4; } } } draw(surface) { const centerX = this.rect.x + this.rect.width / 2; const centerY = this.rect.y + this.rect.height / 2; if (this.type === 'saw') { surface.save(); surface.translate(centerX, centerY); surface.rotate(this.angle * Math.PI / 180); surface.drawImage(this.image, -this.rect.width / 2, -this.rect.height / 2, this.rect.width, this.rect.height); surface.restore(); } else { let scale = 1.0; if (this.pulse_phase > 0) { scale = 1.0 + 0.25 * Math.sin(this.pulse_phase); } const w = this.rect.width * scale; const h = this.rect.height * scale; surface.drawImage(this.image, centerX - w / 2, centerY - h / 2, w, h); } } }
-class Ball { 
-    constructor(x, y, base_image, color, name, initial_diameter) { 
-        this.pos = new Vector2(x, y); 
-        this.vel = new Vector2(Math.random() * 2 - 1, Math.random() * 2 - 1).normalize().multiply(7 + Math.random() * 5); 
-        this.base_image = base_image; 
-        this.color = color; 
-        this.name = name; 
-        this.hp = MAX_HP; 
-        this.display_hp = MAX_HP; 
-        this.is_attacking = false; 
-        this.saw_angle = 0; 
-        this.initial_diameter = initial_diameter; 
-        this.current_scale = 1.0; 
-        this.target_scale = 1.0; 
-        this.image = null; 
-        this.recreate_surface(); 
-    } 
+class Ball {
+    constructor(x, y, base_image, color, name, initial_diameter, headless) {
+        this.pos = new Vector2(x, y);
+        const speedMul = gameSettings.ballSpeed;
+        this.vel = new Vector2(rng() * 2 - 1, rng() * 2 - 1).normalize().multiply((7 + rng() * 5) * speedMul);
+        this.base_image = base_image;
+        this.color = color;
+        this.name = name;
+        this.hp = MAX_HP;
+        this.display_hp = MAX_HP;
+        this.min_hp_seen = MAX_HP; // for comeback detection in simulation
+        this.is_attacking = false;
+        this.saw_angle = 0;
+        this.initial_diameter = initial_diameter;
+        this.current_scale = 1.0;
+        this.target_scale = 1.0;
+        this.image = null;
+        this.headless = !!headless;
+        this.alive_index = 0; // assigned externally
+        if (!this.headless) this.recreate_surface();
+    }
     recreate_surface() {
         const diameter = Math.max(10, this.initial_diameter * this.current_scale);
         this.radius = diameter / 2;
@@ -260,26 +469,40 @@ class Ball {
         }
         this.image = ballCanvas;
     }
-    update_hp(amount) { this.hp = Math.max(0, Math.min(MAX_HP, this.hp + amount)); const min_scale = 0.5, max_scale = 1.0; this.target_scale = (this.hp <= 0) ? min_scale : (min_scale + (max_scale - min_scale) * ((this.hp - 1) / (MAX_HP - 1))); } 
-    update(bounds, trigger_shake) { 
-        if (Math.abs(this.current_scale - this.target_scale) > 0.001) { this.current_scale += (this.target_scale - this.current_scale) * 0.1; this.recreate_surface(); } 
-        if (Math.abs(this.display_hp - this.hp) > 0.001) { this.display_hp += (this.hp - this.display_hp) * 0.1; } 
-        this.pos = this.pos.add(this.vel); 
-        if (this.is_attacking) this.saw_angle += 10; 
-        let hit_wall = false; 
-        if (this.pos.x - this.radius < bounds.left) { this.pos.x = bounds.left + this.radius; this.vel.x *= -1; hit_wall = true; } 
-        if (this.pos.x + this.radius > bounds.right) { this.pos.x = bounds.right - this.radius; this.vel.x *= -1; hit_wall = true; } 
-        if (this.pos.y - this.radius < bounds.top) { this.pos.y = bounds.top + this.radius; this.vel.y *= -1; hit_wall = true; } 
-        if (this.pos.y + this.radius > bounds.bottom) { this.pos.y = bounds.bottom - this.radius; this.vel.y *= -1; hit_wall = true; } 
-        
-        if (hit_wall) { 
-            this.vel.x += (Math.random() - 0.5) * 2; 
-            this.vel.y += (Math.random() - 0.5) * 2; 
-            this.vel = this.vel.normalize().multiply(7 + Math.random() * 4); 
-            trigger_shake(); 
-            if (this.hp > 0) playSound('hit_border'); 
-        } 
-    } 
+    update_hp(amount) {
+        this.hp = Math.max(0, Math.min(MAX_HP, this.hp + amount));
+        if (this.hp < this.min_hp_seen) this.min_hp_seen = this.hp;
+        const min_scale = 0.5, max_scale = 1.0;
+        this.target_scale = (this.hp <= 0) ? min_scale : (min_scale + (max_scale - min_scale) * ((this.hp - 1) / (MAX_HP - 1)));
+    }
+    update(bounds, trigger_shake) {
+        if (!this.headless) {
+            if (Math.abs(this.current_scale - this.target_scale) > 0.001) { this.current_scale += (this.target_scale - this.current_scale) * 0.1; this.recreate_surface(); }
+            if (Math.abs(this.display_hp - this.hp) > 0.001) { this.display_hp += (this.hp - this.display_hp) * 0.1; }
+        } else {
+            // Headless: still sync radius for collisions
+            if (Math.abs(this.current_scale - this.target_scale) > 0.001) {
+                this.current_scale += (this.target_scale - this.current_scale) * 0.1;
+                this.radius = Math.max(10, this.initial_diameter * this.current_scale) / 2;
+            }
+        }
+        this.pos = this.pos.add(this.vel);
+        if (this.is_attacking) this.saw_angle += 10;
+        let hit_wall = false;
+        if (this.pos.x - this.radius < bounds.left) { this.pos.x = bounds.left + this.radius; this.vel.x *= -1; hit_wall = true; }
+        if (this.pos.x + this.radius > bounds.right) { this.pos.x = bounds.right - this.radius; this.vel.x *= -1; hit_wall = true; }
+        if (this.pos.y - this.radius < bounds.top) { this.pos.y = bounds.top + this.radius; this.vel.y *= -1; hit_wall = true; }
+        if (this.pos.y + this.radius > bounds.bottom) { this.pos.y = bounds.bottom - this.radius; this.vel.y *= -1; hit_wall = true; }
+
+        if (hit_wall) {
+            const speedMul = gameSettings.ballSpeed;
+            this.vel.x += (rng() - 0.5) * 2;
+            this.vel.y += (rng() - 0.5) * 2;
+            this.vel = this.vel.normalize().multiply((7 + rng() * 4) * speedMul);
+            if (trigger_shake) trigger_shake();
+            if (this.hp > 0 && !this.headless) playSound('hit_border');
+        }
+    }
     draw(surface) { if (!this.image) return; if (this.is_attacking) { const num_teeth = 16, outer_radius = this.radius * 1.20; surface.fillStyle = SAW_COLOR; for (let i = 0; i < num_teeth; i++) { const angle = (this.saw_angle + i * (360 / num_teeth)) * Math.PI / 180; const p1_vec = new Vector2(this.radius, 0).rotate_rad(angle); const p2_vec = new Vector2(outer_radius, 0).rotate_rad(angle + Math.PI / num_teeth); const p3_vec = new Vector2(this.radius, 0).rotate_rad(angle + (2 * Math.PI / num_teeth)); surface.beginPath(); surface.moveTo(this.pos.x + p1_vec.x, this.pos.y + p1_vec.y); surface.lineTo(this.pos.x + p2_vec.x, this.pos.y + p2_vec.y); surface.lineTo(this.pos.x + p3_vec.x, this.pos.y + p3_vec.y); surface.closePath(); surface.fill(); } } surface.drawImage(this.image, this.pos.x - this.radius, this.pos.y - this.radius, this.radius * 2, this.radius * 2); } get_rect() { return { x: this.pos.x - this.radius, y: this.pos.y - this.radius, width: this.radius * 2, height: this.radius * 2 }; } }
 
 // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
@@ -355,264 +578,1002 @@ async function loadSound(url, audioContext) {
     }
 }
 
-function playSound(soundKey) { if (!soundKey || !allSounds[soundKey] || !audioCtx || audioCtx.state === 'suspended') return; const buffer = allSounds[soundKey]; if (Array.isArray(buffer) && buffer.length > 0) { const randomBuffer = buffer[Math.floor(Math.random() * buffer.length)]; if (randomBuffer) { const source = audioCtx.createBufferSource(); source.buffer = randomBuffer; source.connect(audioCtx.destination); source.start(0); } } else if (!Array.isArray(buffer)) { const source = audioCtx.createBufferSource(); source.buffer = buffer; source.connect(audioCtx.destination); source.start(0); } }
+function playBuffer(buffer) {
+    if (!buffer || !audioCtx || audioCtx.state === 'suspended') return;
+    try {
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        source.start(0);
+    } catch (e) { /* ignore */ }
+}
+function playSound(soundKey) {
+    if (!soundKey || !allSounds[soundKey] || !audioCtx || audioCtx.state === 'suspended') return;
+    const buffer = allSounds[soundKey];
+    if (Array.isArray(buffer) && buffer.length > 0) {
+        const randomBuffer = buffer[Math.floor(Math.random() * buffer.length)];
+        playBuffer(randomBuffer);
+    } else if (!Array.isArray(buffer)) {
+        playBuffer(buffer);
+    }
+}
+// Play a system sound while respecting a player's custom-sound override.
+// kind: 'attack' (sword_out / on saw pickup) or 'damage' (sword_hit / on taking damage)
+function playSoundForPlayer(kind, player) {
+    if (!player || !audioCtx || audioCtx.state === 'suspended') return;
+    const idx = player.alive_index;
+    const cfg = (typeof idx === 'number' && playersData[idx]) ? playersData[idx] : null;
+    let customBuffer = null, mixWithSystem = false;
+    if (cfg) {
+        if (kind === 'attack') {
+            customBuffer = cfg.attackSoundBuffer;
+            mixWithSystem = !!cfg.attackMixWithSystem;
+        } else if (kind === 'damage') {
+            customBuffer = cfg.damageSoundBuffer;
+            mixWithSystem = !!cfg.damageMixWithSystem;
+        }
+    }
+    const systemKey = (kind === 'attack') ? 'sword_out' : 'sword_hit';
+    if (customBuffer) {
+        playBuffer(customBuffer);
+        if (mixWithSystem) playSound(systemKey);
+    } else {
+        playSound(systemKey);
+    }
+}
 function checkCollision(rect1, rect2) { return rect1.x < rect2.x + rect2.width && rect1.x + rect1.width > rect2.x && rect1.y < rect2.y + rect2.height && rect1.y + rect1.height > rect2.y; }
+function decodeAudioFile(file) {
+    return new Promise((resolve) => {
+        if (!file || !audioCtx) { resolve(null); return; }
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const buffer = await audioCtx.decodeAudioData(e.target.result.slice(0));
+                resolve(buffer);
+            } catch (err) {
+                console.error('Failed to decode user audio file', err);
+                resolve(null);
+            }
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsArrayBuffer(file);
+    });
+}
 
 // --- ОСНОВНЫЕ ИГРОВЫЕ ФУНКЦИИ ---
 function drawBackground(surface) { if (backgroundSettings.type === 'solid') { surface.fillStyle = backgroundSettings.color1; surface.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT); } else { const gradient = surface.createLinearGradient(0, 0, 0, SCREEN_HEIGHT); gradient.addColorStop(0, backgroundSettings.color1); gradient.addColorStop(1, backgroundSettings.color2); surface.fillStyle = gradient; surface.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT); } }
-function draw_ui(surface, ball1, ball2) {
+// HP UI layout — adapts to N players. Returns the bottom-most y used so the arena can sit below.
+let __ui_bottom_y = 280;
+function draw_ui(surface, balls) {
     const bar_margin = 20;
-    const bar_total_width = SCREEN_WIDTH - (bar_margin * 2); 
+    const bar_total_width = SCREEN_WIDTH - (bar_margin * 2);
     const bar_height = 10;
     const spacing = 5;
     const cell_width = (bar_total_width - spacing * (MAX_HP - 1)) / MAX_HP;
-    const y_pos1 = 165;
-    const y_pos2 = 230;
     const x_start = bar_margin;
-    surface.font = "bold 22px Arial";
+    const n = balls.length;
+    // Per-player vertical slot. With 2 players use the original 65px spacing; with more,
+    // shrink so all bars + names fit before the arena.
+    const slot_h = (n <= 2) ? 65 : Math.max(38, Math.min(65, Math.floor(180 / n)));
+    const font_px = (n <= 4) ? 22 : (n <= 6 ? 18 : 14);
+    const top_y = 30 + (n <= 2 ? 135 : 30);
+    surface.font = `bold ${font_px}px Arial`;
     surface.textAlign = "center";
+    for (let p = 0; p < n; p++) {
+        const ball = balls[p];
+        const y_pos = top_y + p * slot_h;
+        surface.fillStyle = WHITE;
+        surface.fillText(ball.name, SCREEN_WIDTH / 2, y_pos - 8);
+        const hp_val = ball.hp <= 0 ? 0 : ball.display_hp;
+        for (let i = 0; i < MAX_HP; i++) {
+            const cell_x = x_start + i * (cell_width + spacing);
+            const hp_in_this_cell = Math.max(0, Math.min(1, hp_val - i));
+            const fill_width = cell_width * hp_in_this_cell;
+            surface.fillStyle = GREY;
+            surface.fillRect(cell_x, y_pos, cell_width, bar_height);
+            if (fill_width > 0) { surface.fillStyle = ball.color; surface.fillRect(cell_x, y_pos, fill_width, bar_height); }
+            surface.strokeStyle = WHITE;
+            surface.lineWidth = 2;
+            surface.strokeRect(cell_x, y_pos, cell_width, bar_height);
+        }
+    }
+    __ui_bottom_y = top_y + n * slot_h + 20;
+}
+function drawMainMenuButton(surface) {
+    if (!mainMenuButton.visible) return;
+    if (mainMenuButton.alpha < 1) mainMenuButton.alpha += 0.02;
+    surface.save();
+    surface.globalAlpha = mainMenuButton.alpha;
+    surface.fillStyle = "#008c9e";
+    surface.strokeStyle = "#00bcd4";
+    surface.lineWidth = 2;
+    surface.fillRect(mainMenuButton.rect.x, mainMenuButton.rect.y, mainMenuButton.rect.width, mainMenuButton.rect.height);
+    surface.strokeRect(mainMenuButton.rect.x, mainMenuButton.rect.y, mainMenuButton.rect.width, mainMenuButton.rect.height);
     surface.fillStyle = WHITE;
-    surface.fillText(ball1.name, SCREEN_WIDTH / 2, y_pos1 - 15);
-    surface.fillText(ball2.name, SCREEN_WIDTH / 2, y_pos2 - 15);
-    for (let i = 0; i < MAX_HP; i++) {
-        const hp_val1 = ball1.hp <= 0 ? 0 : ball1.display_hp;
-        const hp_val2 = ball2.hp <= 0 ? 0 : ball2.display_hp;
-        const cell_x1 = x_start + i * (cell_width + spacing);
-        const hp_in_this_cell1 = Math.max(0, Math.min(1, hp_val1 - i));
-        const fill_width1 = cell_width * hp_in_this_cell1;
-        surface.fillStyle = GREY;
-        surface.fillRect(cell_x1, y_pos1, cell_width, bar_height);
-        if (fill_width1 > 0) { surface.fillStyle = ball1.color; surface.fillRect(cell_x1, y_pos1, fill_width1, bar_height); }
-        surface.strokeStyle = WHITE;
-        surface.lineWidth = 2;
-        surface.strokeRect(cell_x1, y_pos1, cell_width, bar_height);
-        
-        const cell_x2 = x_start + i * (cell_width + spacing);
-        const hp_in_this_cell2 = Math.max(0, Math.min(1, hp_val2 - i));
-        const fill_width2 = cell_width * hp_in_this_cell2;
-        surface.fillStyle = GREY;
-        surface.fillRect(cell_x2, y_pos2, cell_width, bar_height);
-        if (fill_width2 > 0) { surface.fillStyle = ball2.color; surface.fillRect(cell_x2, y_pos2, fill_width2, bar_height); }
-        surface.strokeRect(cell_x2, y_pos2, cell_width, bar_height);
+    surface.font = "bold 24px Arial";
+    surface.textAlign = "center";
+    surface.textBaseline = "middle";
+    surface.fillText(mainMenuButton.text, mainMenuButton.rect.x + mainMenuButton.rect.width / 2, mainMenuButton.rect.y + mainMenuButton.rect.height / 2);
+    surface.restore();
+}
+
+let initial_arena_width, final_arena_width, total_shrink, shrink_duration_frames;
+let current_arena_size, arena_y_offset, arena_center_pos, arena;
+let game_ball_diameter;
+
+function getInitialPositions(n, centerX, centerY, radius) {
+    const positions = [];
+    if (n === 1) {
+        positions.push({ x: centerX, y: centerY });
+    } else if (n === 2) {
+        positions.push({ x: centerX - radius / 2, y: centerY });
+        positions.push({ x: centerX + radius / 2, y: centerY });
+    } else {
+        const r = radius * 0.55;
+        for (let i = 0; i < n; i++) {
+            const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
+            positions.push({ x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) });
+        }
+    }
+    return positions;
+}
+
+// Initialise game-side state for either visible play or headless simulation.
+// `images` is array (indexed per player) of base images (or null for headless).
+function initGameState(playerConfigs, images, screenW, screenH, headless) {
+    SCREEN_WIDTH = screenW;
+    SCREEN_HEIGHT = screenH;
+    const n = playerConfigs.length;
+
+    // Reserve some vertical space for the HP UI based on N players.
+    const slot_h = (n <= 2) ? 65 : Math.max(38, Math.min(65, Math.floor(180 / n)));
+    const ui_top_offset = 30 + (n <= 2 ? 135 : 30);
+    const ui_height = n * slot_h + 20;
+    arena_y_offset = ui_top_offset + ui_height;
+
+    initial_arena_width = SCREEN_WIDTH * 0.9;
+    if (arena_y_offset + initial_arena_width > SCREEN_HEIGHT - 20) {
+        initial_arena_width = SCREEN_HEIGHT - arena_y_offset - 20;
+    }
+    if (initial_arena_width < 200) initial_arena_width = 200;
+
+    final_arena_width = initial_arena_width * 0.6;
+    total_shrink = initial_arena_width - final_arena_width;
+    shrink_duration_frames = (120 * FPS) / Math.max(0.0001, gameSettings.arenaShrinkSpeed);
+    current_arena_size = initial_arena_width;
+    arena_center_pos = { x: SCREEN_WIDTH / 2, y: arena_y_offset + initial_arena_width / 2 };
+    arena = {
+        left: arena_center_pos.x - current_arena_size / 2,
+        top: arena_y_offset,
+        width: current_arena_size,
+        height: current_arena_size,
+        right: arena_center_pos.x + current_arena_size / 2,
+        bottom: arena_y_offset + current_arena_size
+    };
+    game_ball_diameter = (initial_arena_width / 5) * gameSettings.ballSize;
+
+    saw_on_map = false;
+    heart_on_map = false;
+    saw_spawn_timer = (2 * FPS) / Math.max(0.0001, gameSettings.sawSpawnFreq);
+    heart_spawn_timer = (2 * FPS) / Math.max(0.0001, gameSettings.heartSpawnFreq);
+
+    particles_list = [];
+    powerups = [];
+    game_over = false;
+    winner = null;
+    gameOverTime = null;
+    game_frame = 0;
+    screen_shake = 0;
+    mainMenuButton.visible = false;
+    mainMenuButton.alpha = 0;
+
+    const positions = getInitialPositions(n, arena_center_pos.x, arena_center_pos.y, initial_arena_width / 2);
+    players = [];
+    for (let i = 0; i < n; i++) {
+        const cfg = playerConfigs[i];
+        const img = (images && images[i]) || null;
+        const ball = new Ball(positions[i].x, positions[i].y, img, cfg.color, cfg.name, game_ball_diameter, headless);
+        ball.alive_index = i;
+        players.push(ball);
     }
 }
-function drawMainMenuButton(surface) { if (!mainMenuButton.visible) return; if (mainMenuButton.alpha < 1) mainMenuButton.alpha += 0.02; surface.save(); surface.globalAlpha = mainMenuButton.alpha; surface.fillStyle = "#008c9e"; surface.strokeStyle = "#00bcd4"; surface.lineWidth = 2; surface.fillRect(mainMenuButton.rect.x, mainMenuButton.rect.y, mainMenuButton.rect.width, mainMenuButton.rect.height); surface.strokeRect(mainMenuButton.rect.x, mainMenuButton.rect.y, mainMenuButton.rect.width, mainMenuButton.rect.height); surface.fillStyle = WHITE; surface.font = "bold 24px Arial"; surface.textAlign = "center"; surface.textBaseline = "middle"; surface.fillText(mainMenuButton.text, mainMenuButton.rect.x + mainMenuButton.rect.width / 2, mainMenuButton.rect.y + mainMenuButton.rect.height / 2); surface.restore(); }
-let last_time = 0; let initial_arena_width, final_arena_width, total_shrink, shrink_duration_frames; let current_arena_size, arena_y_offset, arena_center_pos, arena;
-function game_loop(timestamp) { if (!running) return; requestAnimationFrame(game_loop); const delta_time = timestamp - last_time; if (delta_time < 1000 / FPS) return; last_time = timestamp; ctx.save(); 
-drawBackground(ctx); if (screen_shake > 0) { screen_shake--; ctx.translate(Math.random() * screen_shake * 2 - screen_shake, Math.random() * screen_shake * 2 - screen_shake); } if (!game_over) { const elapsed_frames = (Date.now() - game_start_time) / (1000 / FPS); if (elapsed_frames < shrink_duration_frames) { current_arena_size = initial_arena_width - (total_shrink * (elapsed_frames / shrink_duration_frames)); arena.width = arena.height = Math.floor(current_arena_size); arena.left = arena_center_pos.x - arena.width / 2; arena.top = arena_center_pos.y - arena.height / 2; arena.right = arena.left + arena.width; arena.bottom = arena.top + arena.height; } for (const pup of powerups) { if (pup.rect.x < arena.left) pup.rect.x = arena.left; if (pup.rect.x + pup.rect.width > arena.right) pup.rect.x = arena.right - pup.rect.width; if (pup.rect.y < arena.top) pup.rect.y = arena.top; if (pup.rect.y + pup.rect.height > arena.bottom) pup.rect.y = arena.bottom - pup.rect.height; } player1.update(arena, () => { screen_shake = 4; }); player2.update(arena, () => { screen_shake = 4; }); const dist = player1.pos.distanceTo(player2.pos); if (dist < player1.radius + player2.radius) { if (dist > 0) { const normal = player2.pos.subtract(player1.pos).normalize(); const rel_vel = player1.vel.subtract(player2.vel); const v_normal = rel_vel.dot(normal); if (v_normal > 0) { const impulse = v_normal; player1.vel = player1.vel.subtract(normal.multiply(impulse)); player2.vel = player2.vel.add(normal.multiply(impulse)); screen_shake = 4; } } if (player1.is_attacking) { player2.update_hp(-1); player1.is_attacking = false; particles_list.push(new Particle(player2.pos.x, player2.pos.y, [player2.color], 60, 3, 8, 0.1, [30, 60], [1, 6])); playSound('sword_hit'); } else if (player2.is_attacking) { player1.update_hp(-1); player2.is_attacking = false; particles_list.push(new Particle(player1.pos.x, player1.pos.y, [player1.color], 60, 3, 8, 0.1, [30, 60], [1, 6])); playSound('sword_hit'); } } } else { if (winner) winner.update(arena, () => {}); if (gameOverTime && Date.now() - gameOverTime > 4000) { mainMenuButton.visible = true; } } powerups.forEach(p => p.update()); 
 
-const getNewPowerupTimer = () => (0.5 + Math.random() * 1.5) * FPS;
+const getNewSawTimer = () => ((0.5 + rng() * 1.5) * FPS) / Math.max(0.0001, gameSettings.sawSpawnFreq);
+const getNewHeartTimer = () => ((0.5 + rng() * 1.5) * FPS) / Math.max(0.0001, gameSettings.heartSpawnFreq);
 
-if (!saw_on_map && !game_over) { saw_spawn_timer--; if (saw_spawn_timer <= 0) { let x, y, size = 40; do { x = arena.left + Math.random() * (arena.width - size); y = arena.top + Math.random() * (arena.height - size); } while (checkCollision({ x, y, width: size, height: size }, player1.get_rect()) || checkCollision({ x, y, width: size, height: size }, player2.get_rect())); powerups.push(new PowerUp(x, y, 'saw')); saw_on_map = true; playSound('pop'); saw_spawn_timer = getNewPowerupTimer(); } } if (!heart_on_map && !game_over) { heart_spawn_timer--; if (heart_spawn_timer <= 0) { let x, y, size = 35; do { x = arena.left + Math.random() * (arena.width - size); y = arena.top + Math.random() * (arena.height - size); } while (checkCollision({ x, y, width: size, height: size }, player1.get_rect()) || checkCollision({ x, y, width: size, height: size }, player2.get_rect())); powerups.push(new PowerUp(x, y, 'heart')); heart_on_map = true; playSound('pop'); heart_spawn_timer = getNewPowerupTimer(); } } if (!game_over) { powerups = powerups.filter(pup => { let collected = false; if (checkCollision(pup.rect, player1.get_rect())) { if (pup.type === 'saw') { player1.is_attacking = true; player2.is_attacking = false; playSound('sword_out'); } if (pup.type === 'heart') { player1.update_hp(1); playSound('pop'); } collected = true; } else if (checkCollision(pup.rect, player2.get_rect())) { if (pup.type === 'saw') { player2.is_attacking = true; player1.is_attacking = false; playSound('sword_out'); } if (pup.type === 'heart') { player2.update_hp(1); playSound('pop'); } collected = true; } if (collected) { if (pup.type === 'saw') { saw_on_map = false; } if (pup.type === 'heart') { heart_on_map = false; } return false; } return true; }); } if ((player1.hp <= 0 || player2.hp <= 0) && !game_over) { game_over = true; gameOverTime = Date.now(); loser = player1.hp <= 0 ? player1 : player2; winner = player1.hp <= 0 ? player2 : player1; const colors = Array.from({ length: 10 }, () => `rgb(${50 + Math.random() * 205}, ${50 + Math.random() * 205}, ${50 + Math.random() * 205})`); particles_list.push(new Particle(loser.pos.x, loser.pos.y, colors, 500, 3, 10, 0.05, [80, 150], [2, 12])); } const hue = (Date.now() / 20) % 360; ctx.strokeStyle = `hsl(${hue}, 100%, 50%)`; ctx.lineWidth = 8; ctx.strokeRect(arena.left, arena.top, arena.width, arena.height); powerups.forEach(p => p.draw(ctx)); if (player1.hp > 0 || winner === player1) player1.draw(ctx); if (player2.hp > 0 || winner === player2) player2.draw(ctx); particles_list.forEach(p => { p.update(); p.draw(ctx); }); particles_list = particles_list.filter(p => p.particles.length > 0); ctx.restore(); draw_ui(ctx, player1, player2); drawMainMenuButton(ctx); }
-function resetToMainMenu() { 
-    running = false; 
-    releaseWakeLock();
-    document.body.style.backgroundColor = 'var(--bg-color)'; 
-    document.getElementById('setup-screen').style.display = 'block'; 
-    document.getElementById('game-container').style.display = 'none'; 
-    game_over = false; winner = null; loser = null; gameOverTime = null; 
-    particles_list = []; powerups = []; 
-    mainMenuButton.visible = false; mainMenuButton.alpha = 0; 
+function findFreePowerupSpot(size) {
+    let x = 0, y = 0;
+    for (let attempts = 0; attempts < 60; attempts++) {
+        x = arena.left + rng() * Math.max(0, (arena.width - size));
+        y = arena.top + rng() * Math.max(0, (arena.height - size));
+        const rect = { x, y, width: size, height: size };
+        let overlap = false;
+        for (const p of players) {
+            if (checkCollision(rect, p.get_rect())) { overlap = true; break; }
+        }
+        if (!overlap) return { x, y };
+    }
+    return { x, y };
 }
-function startGame(p1_data, p2_data, bg_settings) { 
-    acquireWakeLock();
 
+// Performs one frame of game logic. Used by both live loop and headless simulation.
+function updateGameStep(headless) {
+    if (game_over) {
+        if (winner && !winner.headless) winner.update(arena, () => {});
+        return;
+    }
+    game_frame++;
+
+    // Arena shrinkage (driven by frame counter — deterministic).
+    if (game_frame < shrink_duration_frames) {
+        current_arena_size = initial_arena_width - (total_shrink * (game_frame / shrink_duration_frames));
+        arena.width = arena.height = Math.floor(current_arena_size);
+        arena.left = arena_center_pos.x - arena.width / 2;
+        arena.top = arena_center_pos.y - arena.height / 2;
+        arena.right = arena.left + arena.width;
+        arena.bottom = arena.top + arena.height;
+    }
+
+    // Clamp powerups inside shrinking arena.
+    for (const pup of powerups) {
+        if (pup.rect.x < arena.left) pup.rect.x = arena.left;
+        if (pup.rect.x + pup.rect.width > arena.right) pup.rect.x = arena.right - pup.rect.width;
+        if (pup.rect.y < arena.top) pup.rect.y = arena.top;
+        if (pup.rect.y + pup.rect.height > arena.bottom) pup.rect.y = arena.bottom - pup.rect.height;
+    }
+
+    const shake = headless ? null : (() => { screen_shake = 4; });
+    for (const p of players) {
+        if (p.hp > 0) p.update(arena, shake);
+    }
+
+    // Pairwise ball collisions — same physics as before, applied to every alive pair.
+    for (let i = 0; i < players.length; i++) {
+        const a = players[i];
+        if (a.hp <= 0) continue;
+        for (let j = i + 1; j < players.length; j++) {
+            const b = players[j];
+            if (b.hp <= 0) continue;
+            const dist = a.pos.distanceTo(b.pos);
+            if (dist >= a.radius + b.radius) continue;
+            if (dist > 0) {
+                const normal = b.pos.subtract(a.pos).normalize();
+                const rel_vel = a.vel.subtract(b.vel);
+                const v_normal = rel_vel.dot(normal);
+                if (v_normal > 0) {
+                    const impulse = v_normal;
+                    a.vel = a.vel.subtract(normal.multiply(impulse));
+                    b.vel = b.vel.add(normal.multiply(impulse));
+                    if (!headless) screen_shake = 4;
+                }
+            }
+            // Saw/attack damage. If both attacking, both take damage and both saws consumed.
+            const aAttack = a.is_attacking, bAttack = b.is_attacking;
+            if (aAttack && bAttack) {
+                b.update_hp(-1); a.update_hp(-1);
+                a.is_attacking = false; b.is_attacking = false;
+                if (!headless) {
+                    particles_list.push(new Particle(b.pos.x, b.pos.y, [b.color], 60, 3, 8, 0.1, [30, 60], [1, 6]));
+                    particles_list.push(new Particle(a.pos.x, a.pos.y, [a.color], 60, 3, 8, 0.1, [30, 60], [1, 6]));
+                    playSoundForPlayer('damage', b);
+                    playSoundForPlayer('damage', a);
+                }
+            } else if (aAttack) {
+                b.update_hp(-1);
+                a.is_attacking = false;
+                if (!headless) {
+                    particles_list.push(new Particle(b.pos.x, b.pos.y, [b.color], 60, 3, 8, 0.1, [30, 60], [1, 6]));
+                    playSoundForPlayer('damage', b);
+                }
+            } else if (bAttack) {
+                a.update_hp(-1);
+                b.is_attacking = false;
+                if (!headless) {
+                    particles_list.push(new Particle(a.pos.x, a.pos.y, [a.color], 60, 3, 8, 0.1, [30, 60], [1, 6]));
+                    playSoundForPlayer('damage', a);
+                }
+            }
+        }
+    }
+
+    // Powerup spawn (saw / heart). One of each on the map at most, like the original game.
+    if (!saw_on_map) {
+        saw_spawn_timer--;
+        if (saw_spawn_timer <= 0) {
+            const spot = findFreePowerupSpot(40);
+            powerups.push(new PowerUp(spot.x, spot.y, 'saw'));
+            saw_on_map = true;
+            if (!headless) playSound('pop');
+            saw_spawn_timer = getNewSawTimer();
+        }
+    }
+    if (!heart_on_map) {
+        heart_spawn_timer--;
+        if (heart_spawn_timer <= 0) {
+            const spot = findFreePowerupSpot(35);
+            powerups.push(new PowerUp(spot.x, spot.y, 'heart'));
+            heart_on_map = true;
+            if (!headless) playSound('pop');
+            heart_spawn_timer = getNewHeartTimer();
+        }
+    }
+
+    // Powerup pickup. Saw is exclusive (others lose attack). Heart heals one HP.
+    powerups = powerups.filter(pup => {
+        for (const p of players) {
+            if (p.hp <= 0) continue;
+            if (!checkCollision(pup.rect, p.get_rect())) continue;
+            if (pup.type === 'saw') {
+                for (const q of players) q.is_attacking = false;
+                p.is_attacking = true;
+                if (!headless) playSoundForPlayer('attack', p);
+                saw_on_map = false;
+            } else if (pup.type === 'heart') {
+                p.update_hp(1);
+                if (!headless) playSound('pop');
+                heart_on_map = false;
+            }
+            return false; // remove powerup
+        }
+        return true;
+    });
+
+    // Update powerup visuals (rotation/pulse). Doesn't affect simulation.
+    if (!headless) powerups.forEach(p => p.update());
+
+    // Win condition: only one player with hp > 0 (or all dead — last killed wins).
+    const alive = players.filter(p => p.hp > 0);
+    if (alive.length <= 1 && !game_over) {
+        game_over = true;
+        gameOverTime = Date.now();
+        winner = alive[0] || players.reduce((a, b) => (a.min_hp_seen >= b.min_hp_seen ? a : b));
+        if (!headless) {
+            for (const loser of players) {
+                if (loser === winner) continue;
+                const colors = Array.from({ length: 10 }, () => `rgb(${50 + Math.random() * 205}, ${50 + Math.random() * 205}, ${50 + Math.random() * 205})`);
+                particles_list.push(new Particle(loser.pos.x, loser.pos.y, colors, 500, 3, 10, 0.05, [80, 150], [2, 12]));
+            }
+        }
+    }
+}
+
+function game_loop(timestamp) {
+    if (!running) return;
+    requestAnimationFrame(game_loop);
+    const delta_time = timestamp - last_time;
+    if (delta_time < 1000 / FPS) return;
+    last_time = timestamp;
+
+    ctx.save();
+    drawBackground(ctx);
+    if (screen_shake > 0) {
+        screen_shake--;
+        ctx.translate(Math.random() * screen_shake * 2 - screen_shake, Math.random() * screen_shake * 2 - screen_shake);
+    }
+
+    updateGameStep(false);
+
+    // Show "main menu" button after game over.
+    if (game_over && gameOverTime && Date.now() - gameOverTime > 4000) {
+        mainMenuButton.visible = true;
+    }
+
+    // Rainbow border (visual only).
+    const hue = (Date.now() / 20) % 360;
+    ctx.strokeStyle = `hsl(${hue}, 100%, 50%)`;
+    ctx.lineWidth = 8;
+    ctx.strokeRect(arena.left, arena.top, arena.width, arena.height);
+
+    powerups.forEach(p => p.draw(ctx));
+    for (const p of players) {
+        if (p.hp > 0 || winner === p) p.draw(ctx);
+    }
+    particles_list.forEach(p => { p.update(); p.draw(ctx); });
+    particles_list = particles_list.filter(p => p.particles.length > 0);
+
+    ctx.restore();
+    draw_ui(ctx, players);
+    drawMainMenuButton(ctx);
+}
+
+function resetToMainMenu() {
+    running = false;
+    releaseWakeLock();
+    document.body.style.backgroundColor = 'var(--bg-color)';
+    document.getElementById('setup-screen').style.display = 'block';
+    document.getElementById('game-container').style.display = 'none';
+    game_over = false; winner = null; gameOverTime = null;
+    particles_list = []; powerups = [];
+    players = [];
+    mainMenuButton.visible = false;
+    mainMenuButton.alpha = 0;
+    clearGameSeed();
+    renderPlayersGrid();
+}
+
+// Run a fully headless simulation with the given seed; return outcome metadata.
+function runHeadlessSimulation(seed, playerConfigs, screenW, screenH, maxFrames) {
+    setGameSeed(seed);
+    initGameState(playerConfigs, null, screenW, screenH, true);
+    let frame = 0;
+    while (!game_over && frame < maxFrames) {
+        updateGameStep(true);
+        frame++;
+    }
+    const winnerIdx = winner ? winner.alive_index : -1;
+    const minHpPerPlayer = players.map(p => p.min_hp_seen);
+    return {
+        seed,
+        winnerIdx,
+        durationSec: frame / FPS,
+        minHpPerPlayer,
+        completed: game_over
+    };
+}
+
+function startGame(playerDataList, bg_settings, options) {
+    options = options || {};
+    acquireWakeLock();
     document.getElementById('setup-screen').style.display = 'none';
     document.getElementById('game-container').style.display = 'block';
-    
+
     SCREEN_WIDTH = Math.min(window.innerWidth, MAX_GAME_WIDTH);
     SCREEN_HEIGHT = window.innerHeight;
     canvas.style.width = SCREEN_WIDTH + 'px';
     canvas.style.height = SCREEN_HEIGHT + 'px';
     canvas.width = Math.floor(SCREEN_WIDTH * dpr);
     canvas.height = Math.floor(SCREEN_HEIGHT * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
-    
-    if(bg_settings.type === 'solid') {
+
+    if (bg_settings.type === 'solid') {
         document.body.style.backgroundColor = bg_settings.color1;
     } else {
         document.body.style.background = `linear-gradient(to bottom, ${bg_settings.color1}, ${bg_settings.color2})`;
     }
-
     backgroundSettings = bg_settings;
-    // ИЗМЕНЕНО: Изображения уже загружены и находятся в глобальных переменных.
-    
-    const ui_bottom_margin = 280;
-    arena_y_offset = ui_bottom_margin;
-    initial_arena_width = SCREEN_WIDTH * 0.9;
-    
-    if (arena_y_offset + initial_arena_width > SCREEN_HEIGHT - 20) {
-        initial_arena_width = SCREEN_HEIGHT - arena_y_offset - 20;
+
+    if (typeof options.seed === 'number') {
+        setGameSeed(options.seed);
+    } else {
+        clearGameSeed();
     }
 
-    final_arena_width = initial_arena_width * 0.6; 
-    total_shrink = initial_arena_width - final_arena_width; 
-    shrink_duration_frames = 120 * FPS; 
-    current_arena_size = initial_arena_width;
-    arena_center_pos = { x: SCREEN_WIDTH / 2, y: arena_y_offset + initial_arena_width / 2 }; 
-    arena = { left: arena_center_pos.x - current_arena_size / 2, top: arena_y_offset, width: current_arena_size, height: current_arena_size, right: arena_center_pos.x + current_arena_size / 2, bottom: arena_y_offset + current_arena_size }; 
-    const BALL_DIAMETER = initial_arena_width / 5;
-    
-    saw_on_map = false;
-    heart_on_map = false;
-    saw_spawn_timer = 2 * FPS;
-    heart_spawn_timer = 2 * FPS;
+    const images = playerDataList.map(p => p.image);
+    initGameState(playerDataList, images, SCREEN_WIDTH, SCREEN_HEIGHT, false);
 
     mainMenuButton.rect.x = (SCREEN_WIDTH - mainMenuButton.rect.width) / 2;
     mainMenuButton.rect.y = SCREEN_HEIGHT - mainMenuButton.rect.height - 40;
-    player1 = new Ball(arena_center_pos.x - initial_arena_width / 4, arena_center_pos.y, p1_data.image, p1_data.color, p1_data.name, BALL_DIAMETER); 
-    player2 = new Ball(arena_center_pos.x + initial_arena_width / 4, arena_center_pos.y, p2_data.image, p2_data.color, p2_data.name, BALL_DIAMETER); 
-    game_start_time = Date.now(); 
-    running = true; 
+    last_time = 0;
+    running = true;
     requestAnimationFrame(game_loop);
 }
 
 // --- ЛОГИКА НАСТРОЙКИ И ПРЕДПРОСМОТРА ---
-let p1_preview_image, p2_preview_image;
-let currentPlayerEditing = null;
+let currentPlayerEditing = null; // index into playersData[]
+let assetsLoaded = false;
 
-function drawPreviewBall(playerNum) {
-    const canvas = document.getElementById(`p${playerNum}-preview-canvas`);
-    const ctx = canvas.getContext('2d');
+function makeDefaultPlayer(idx) {
+    return {
+        name: `Игрок ${idx + 1}`,
+        color: DEFAULT_PLAYER_COLORS[idx % DEFAULT_PLAYER_COLORS.length],
+        imageUrl: '',
+        imageFile: null,
+        previewImage: null,
+        attackSoundFile: null,
+        attackSoundBuffer: null,
+        attackMixWithSystem: false,
+        damageSoundFile: null,
+        damageSoundBuffer: null,
+        damageMixWithSystem: false
+    };
+}
+
+function ensurePlayersDataInitialised() {
+    if (playersData.length === 0) {
+        playersData = [makeDefaultPlayer(0), makeDefaultPlayer(1)];
+    }
+}
+
+function drawPreviewBallOnCanvas(canvas, color, name, avatar) {
+    const ctx2 = canvas.getContext('2d');
     const cssWidth = parseInt(canvas.style.width, 10);
     const cssHeight = parseInt(canvas.style.height, 10);
-    
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx2.clearRect(0, 0, canvas.width, canvas.height);
 
-    const color = document.getElementById(`p${playerNum}-color-picker`).value;
-    const name = document.getElementById(`p${playerNum}-name`).value;
-    const avatar = playerNum === 1 ? p1_preview_image : p2_preview_image;
-    
     const diameter = cssWidth * 0.7;
     const radius = diameter / 2;
     const centerX = cssWidth / 2;
     const centerY = cssHeight / 2 + 15;
 
-    ctx.fillStyle = "#f0f0f0";
-    ctx.font = "bold 18px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    ctx.fillText(name, centerX, 35);
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-    ctx.fillStyle = color;
-    ctx.fill();
+    ctx2.fillStyle = "#f0f0f0";
+    ctx2.font = "bold 16px Arial";
+    ctx2.textAlign = "center";
+    ctx2.textBaseline = "bottom";
+    ctx2.fillText(name, centerX, 32);
+
+    ctx2.beginPath();
+    ctx2.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+    ctx2.fillStyle = color;
+    ctx2.fill();
     const border_thickness = diameter * 0.12;
     const inner_radius = radius - border_thickness;
     if (avatar && inner_radius >= 1) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, inner_radius, 0, 2 * Math.PI);
-        ctx.clip();
-        ctx.drawImage(avatar, centerX - inner_radius, centerY - inner_radius, inner_radius * 2, inner_radius * 2);
-        ctx.restore();
+        ctx2.save();
+        ctx2.beginPath();
+        ctx2.arc(centerX, centerY, inner_radius, 0, 2 * Math.PI);
+        ctx2.clip();
+        ctx2.drawImage(avatar, centerX - inner_radius, centerY - inner_radius, inner_radius * 2, inner_radius * 2);
+        ctx2.restore();
     }
 }
 
-async function updateAndDrawPlayerPreview(playerNum) {
-    const color = document.getElementById(`p${playerNum}-color-picker`).value;
-    const fileInput = document.getElementById(`p${playerNum}-image-file`);
-    const urlInput = document.getElementById(`p${playerNum}-image-url`);
-    
-    const newImage = await getImage(fileInput.files[0], urlInput.value.trim(), color);
-    
-    if (playerNum === 1) { p1_preview_image = newImage; } 
-    else { p2_preview_image = newImage; }
-    
-    drawPreviewBall(playerNum);
+async function refreshPlayerPreview(idx) {
+    const data = playersData[idx];
+    if (!data) return;
+    const newImage = await getImage(data.imageFile, data.imageUrl, data.color);
+    data.previewImage = newImage;
+    const canvas = document.getElementById(`player-preview-canvas-${idx}`);
+    if (canvas) drawPreviewBallOnCanvas(canvas, data.color, data.name, data.previewImage);
 }
 
-function openPlayerModal(playerNum) {
-    currentPlayerEditing = playerNum;
-    const modal = document.getElementById('player-modal');
-    const nameInput = document.getElementById(`p${playerNum}-name`);
-    const colorInput = document.getElementById(`p${playerNum}-color-picker`);
-    const urlInput = document.getElementById(`p${playerNum}-image-url`);
-    
-    const modalTitle = document.getElementById('player-modal-title');
-    const modalName = document.getElementById('modal-p-name');
-    const modalColor = document.getElementById('modal-p-color');
-    const modalUrl = document.getElementById('modal-p-image-url');
-    const modalFile = document.getElementById('modal-p-image-file');
-    modalFile.value = null;
+function renderPlayersGrid() {
+    ensurePlayersDataInitialised();
+    const grid = document.getElementById('players-grid');
+    grid.innerHTML = '';
+    const removable = multiPlayerMode && playersData.length > MIN_PLAYERS;
+    playersData.forEach((data, idx) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'player-preview-area';
+        const cv = document.createElement('canvas');
+        cv.id = `player-preview-canvas-${idx}`;
+        cv.className = 'preview-canvas';
+        const cssW = 220, cssH = 220;
+        cv.width = Math.floor(cssW * dpr);
+        cv.height = Math.floor(cssH * dpr);
+        cv.style.width = cssW + 'px';
+        cv.style.height = cssH + 'px';
+        const cctx = cv.getContext('2d');
+        cctx.scale(dpr, dpr);
+        wrap.appendChild(cv);
 
-    const toggle = document.getElementById('avatar-source-toggle');
-    modalTitle.textContent = `Настройки Игрока ${playerNum}`;
-    modalName.value = nameInput.value;
-    modalColor.value = colorInput.value;
-    modalUrl.value = urlInput.value;
-    
-    const hasUrl = urlInput.value.trim() !== '';
-    const useFile = !hasUrl;
-    toggle.checked = useFile;
+        const btn = document.createElement('button');
+        btn.textContent = `Настройки игрока`;
+        btn.dataset.idx = String(idx);
+        btn.addEventListener('click', () => openPlayerModal(idx));
+        wrap.appendChild(btn);
 
+        if (removable) {
+            const rm = document.createElement('button');
+            rm.className = 'remove-btn';
+            rm.textContent = '×';
+            rm.title = 'Убрать этого игрока';
+            rm.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (playersData.length <= MIN_PLAYERS) return;
+                playersData.splice(idx, 1);
+                renderPlayersGrid();
+                updateRiggedWinnerOptions();
+            });
+            wrap.appendChild(rm);
+        }
+
+        grid.appendChild(wrap);
+    });
+    // After DOM insertion, redraw previews (canvases now exist).
+    playersData.forEach((_, idx) => refreshPlayerPreview(idx));
+
+    document.getElementById('multi-controls').classList.toggle('hidden', !multiPlayerMode);
+    document.getElementById('toggle-multi-mode-btn').textContent = multiPlayerMode ? 'Стандартный режим (2)' : 'Несколько игроков';
+    document.getElementById('mode-indicator').textContent = multiPlayerMode
+        ? `Режим: Несколько игроков (${playersData.length})`
+        : 'Режим: Стандарт (2 игрока)';
+}
+
+function setMultiMode(on) {
+    multiPlayerMode = !!on;
+    if (multiPlayerMode) {
+        // Grow up to MULTI_DEFAULT_COUNT but never shrink existing players.
+        while (playersData.length < MULTI_DEFAULT_COUNT) {
+            playersData.push(makeDefaultPlayer(playersData.length));
+        }
+    } else {
+        // Standard mode locks at exactly two players (preserve first two).
+        if (playersData.length > 2) playersData = playersData.slice(0, 2);
+        while (playersData.length < 2) playersData.push(makeDefaultPlayer(playersData.length));
+    }
+    renderPlayersGrid();
+    updateRiggedWinnerOptions();
+}
+
+function addPlayer() {
+    if (!multiPlayerMode) return;
+    playersData.push(makeDefaultPlayer(playersData.length));
+    renderPlayersGrid();
+    updateRiggedWinnerOptions();
+}
+function removeLastPlayer() {
+    if (!multiPlayerMode) return;
+    if (playersData.length <= MIN_PLAYERS) return;
+    playersData.pop();
+    if (riggedSettings.winnerIndex >= playersData.length) riggedSettings.winnerIndex = 0;
+    renderPlayersGrid();
+    updateRiggedWinnerOptions();
+}
+
+function openPlayerModal(idx) {
+    currentPlayerEditing = idx;
+    const data = playersData[idx];
+    if (!data) return;
+    document.getElementById('player-modal-title').textContent = `Настройки игрока ${idx + 1}`;
+    document.getElementById('modal-p-name').value = data.name;
+    document.getElementById('modal-p-color').value = data.color;
+    document.getElementById('modal-p-image-url').value = data.imageUrl || '';
+    document.getElementById('modal-p-image-file').value = '';
+
+    const useFile = !data.imageUrl;
+    document.getElementById('avatar-source-toggle').checked = useFile;
     document.getElementById('avatar-url-group').classList.toggle('hidden', useFile);
     document.getElementById('avatar-file-group').classList.toggle('hidden', !useFile);
-    modal.classList.remove('hidden');
+
+    // Sound state
+    document.getElementById('modal-p-attack-sound').value = '';
+    document.getElementById('modal-p-attack-sound-meta').textContent = data.attackSoundFile ? `Файл: ${data.attackSoundFile.name}` : 'Файл не выбран';
+    document.getElementById('modal-p-attack-mix').checked = !!data.attackMixWithSystem;
+    document.getElementById('modal-p-damage-sound').value = '';
+    document.getElementById('modal-p-damage-sound-meta').textContent = data.damageSoundFile ? `Файл: ${data.damageSoundFile.name}` : 'Файл не выбран';
+    document.getElementById('modal-p-damage-mix').checked = !!data.damageMixWithSystem;
+
+    document.getElementById('player-modal').classList.remove('hidden');
 }
 
-function saveAndClosePlayerModal() {
-    if (!currentPlayerEditing) return;
-    const playerNum = currentPlayerEditing;
-    const nameStorage = document.getElementById(`p${playerNum}-name`);
-    const colorStorage = document.getElementById(`p${playerNum}-color-picker`);
-    const urlStorage = document.getElementById(`p${playerNum}-image-url`);
-    const fileStorage = document.getElementById(`p${playerNum}-image-file`);
-    const modalName = document.getElementById('modal-p-name');
-    const modalColor = document.getElementById('modal-p-color');
-    const modalUrl = document.getElementById('modal-p-image-url');
-    const modalFile = document.getElementById('modal-p-image-file');
+async function saveAndClosePlayerModal() {
+    if (currentPlayerEditing === null) return;
+    const idx = currentPlayerEditing;
+    const data = playersData[idx];
+    if (!data) { document.getElementById('player-modal').classList.add('hidden'); currentPlayerEditing = null; return; }
 
-    nameStorage.value = modalName.value;
-    colorStorage.value = modalColor.value;
-    
+    data.name = document.getElementById('modal-p-name').value || `Игрок ${idx + 1}`;
+    data.color = document.getElementById('modal-p-color').value;
     const useFile = document.getElementById('avatar-source-toggle').checked;
+    const fileInput = document.getElementById('modal-p-image-file');
+    const urlInput = document.getElementById('modal-p-image-url');
     if (useFile) {
-        if (modalFile.files.length > 0) {
-            fileStorage.files = modalFile.files;
+        if (fileInput.files.length > 0) {
+            data.imageFile = fileInput.files[0];
+            data.imageUrl = '';
         }
-        urlStorage.value = '';
     } else {
-        urlStorage.value = modalUrl.value;
-        fileStorage.value = '';
+        data.imageUrl = urlInput.value.trim();
+        if (data.imageUrl) data.imageFile = null;
+    }
+
+    data.attackMixWithSystem = document.getElementById('modal-p-attack-mix').checked;
+    data.damageMixWithSystem = document.getElementById('modal-p-damage-mix').checked;
+    const attackFile = document.getElementById('modal-p-attack-sound').files[0];
+    const damageFile = document.getElementById('modal-p-damage-sound').files[0];
+    if (attackFile) {
+        if (!audioCtx) audioCtx = new AudioContext();
+        if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
+        data.attackSoundFile = attackFile;
+        data.attackSoundBuffer = await decodeAudioFile(attackFile);
+    }
+    if (damageFile) {
+        if (!audioCtx) audioCtx = new AudioContext();
+        if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
+        data.damageSoundFile = damageFile;
+        data.damageSoundBuffer = await decodeAudioFile(damageFile);
     }
 
     document.getElementById('player-modal').classList.add('hidden');
-    updateAndDrawPlayerPreview(playerNum);
+    await refreshPlayerPreview(idx);
+    updateRiggedWinnerOptions();
     currentPlayerEditing = null;
 }
 
-window.onload = async () => {
-    ['p1-preview-canvas', 'p2-preview-canvas'].forEach(id => {
-        const canvas = document.getElementById(id);
-        const cssWidth = canvas.width;
-        const cssHeight = canvas.height;
-        
-        canvas.width = Math.floor(cssWidth * dpr);
-        canvas.height = Math.floor(cssHeight * dpr);
-        canvas.style.width = cssWidth + 'px';
-        canvas.style.height = cssHeight + 'px';
-        
-        const ctx = canvas.getContext('2d');
-        ctx.scale(dpr, dpr);
+// --- Game settings sliders ---
+const SLIDER_MAP = [
+    { id: 'gs-ball-size',     valId: 'gs-ball-size-val',     prop: 'ballSize' },
+    { id: 'gs-heart-freq',    valId: 'gs-heart-freq-val',    prop: 'heartSpawnFreq' },
+    { id: 'gs-saw-freq',      valId: 'gs-saw-freq-val',      prop: 'sawSpawnFreq' },
+    { id: 'gs-ball-speed',    valId: 'gs-ball-speed-val',    prop: 'ballSpeed' },
+    { id: 'gs-shrink-speed',  valId: 'gs-shrink-speed-val',  prop: 'arenaShrinkSpeed' },
+];
+function applySettingsToSliders() {
+    for (const m of SLIDER_MAP) {
+        const inp = document.getElementById(m.id);
+        const out = document.getElementById(m.valId);
+        if (inp) inp.value = String(gameSettings[m.prop]);
+        if (out) out.textContent = `×${Number(gameSettings[m.prop]).toFixed(2)}`;
+    }
+}
+function wireUpSliders() {
+    for (const m of SLIDER_MAP) {
+        const inp = document.getElementById(m.id);
+        const out = document.getElementById(m.valId);
+        if (!inp) continue;
+        inp.addEventListener('input', () => {
+            const v = parseFloat(inp.value);
+            if (!Number.isNaN(v)) {
+                gameSettings[m.prop] = v;
+                if (out) out.textContent = `×${v.toFixed(2)}`;
+            }
+        });
+    }
+}
+
+// --- Rigged settings ---
+function updateRiggedWinnerOptions() {
+    const cont = document.getElementById('rg-winner-options');
+    if (!cont) return;
+    cont.innerHTML = '';
+    if (riggedSettings.winnerIndex >= playersData.length) riggedSettings.winnerIndex = 0;
+    playersData.forEach((data, idx) => {
+        const opt = document.createElement('div');
+        opt.className = 'winner-option' + (idx === riggedSettings.winnerIndex ? ' selected' : '');
+        opt.textContent = data.name || `Игрок ${idx + 1}`;
+        opt.addEventListener('click', () => {
+            riggedSettings.winnerIndex = idx;
+            updateRiggedWinnerOptions();
+        });
+        cont.appendChild(opt);
     });
+}
+
+function openRiggedModal() {
+    document.getElementById('rg-min-time').value = riggedSettings.minTime;
+    document.getElementById('rg-max-time').value = riggedSettings.maxTime;
+    document.getElementById('rg-comeback').checked = !!riggedSettings.comeback;
+    document.getElementById('rg-comeback-hp').value = riggedSettings.comebackHp;
+    document.getElementById('rg-comeback-hp-val').textContent = String(riggedSettings.comebackHp);
+    document.getElementById('rg-comeback-group').classList.toggle('hidden', !riggedSettings.comeback);
+    updateRiggedWinnerOptions();
+    document.getElementById('rigged-modal').classList.remove('hidden');
+}
+function closeRiggedModal(saved) {
+    if (saved) {
+        const minT = Math.max(1, parseInt(document.getElementById('rg-min-time').value, 10) || 1);
+        const maxT = Math.max(minT, parseInt(document.getElementById('rg-max-time').value, 10) || minT);
+        riggedSettings.minTime = minT;
+        riggedSettings.maxTime = maxT;
+        riggedSettings.comeback = document.getElementById('rg-comeback').checked;
+        riggedSettings.comebackHp = parseInt(document.getElementById('rg-comeback-hp').value, 10) || 1;
+        riggedSettings.enabled = true;
+        document.getElementById('rigged-checkbox').checked = true;
+    } else {
+        // Cancelled — also untick the parent checkbox if it was just enabled.
+        if (!riggedSettings.enabled) document.getElementById('rigged-checkbox').checked = false;
+    }
+    document.getElementById('rigged-modal').classList.add('hidden');
+}
+
+function buildPlayerConfigsForGame() {
+    return playersData.map((d, i) => ({
+        name: d.name || `Игрок ${i + 1}`,
+        color: d.color,
+        image: d.previewImage,
+        index: i
+    }));
+}
+
+function simulationMatchesCriteria(result) {
+    if (result.winnerIdx !== riggedSettings.winnerIndex) return false;
+    if (result.durationSec < riggedSettings.minTime) return false;
+    if (result.durationSec > riggedSettings.maxTime) return false;
+    if (riggedSettings.comeback) {
+        const winnerMin = result.minHpPerPlayer[result.winnerIdx];
+        if (typeof winnerMin !== 'number') return false;
+        if (winnerMin > riggedSettings.comebackHp) return false;
+    }
+    return true;
+}
+
+function showCountdownThen(callback) {
+    const overlay = document.getElementById('countdown-overlay');
+    const num = document.getElementById('countdown-num');
+    let n = 3;
+    overlay.classList.remove('hidden');
+    const tick = () => {
+        num.textContent = String(n);
+        num.classList.remove('anim');
+        // Force reflow so animation restarts.
+        void num.offsetWidth;
+        num.classList.add('anim');
+        if (n === 0) {
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+                num.classList.remove('anim');
+                callback();
+            }, 800);
+            return;
+        }
+        n--;
+        setTimeout(tick, 1000);
+    };
+    tick();
+}
+
+async function runRiggedSearchAndStart(playerConfigs, bg_settings) {
+    const overlay = document.getElementById('simulation-overlay');
+    const counter = document.getElementById('sim-counter');
+    overlay.classList.remove('hidden');
+    counter.textContent = '0';
+    simulationActive = true;
+    simulationCancelled = false;
+
+    const screenW = Math.min(window.innerWidth, MAX_GAME_WIDTH);
+    const screenH = window.innerHeight;
+    const maxFrames = Math.ceil(riggedSettings.maxTime * FPS) + 30;
+
+    let count = 0;
+    let foundSeed = null;
+    const startedAt = performance.now();
+    const HARD_LIMIT = 250000; // safety net so we never lock the page forever
+
+    return await new Promise((resolve, reject) => {
+        const step = () => {
+            if (simulationCancelled) {
+                overlay.classList.add('hidden');
+                simulationActive = false;
+                resolve(false);
+                return;
+            }
+            // Simulate a small batch per frame so the UI stays responsive.
+            const batchEnd = performance.now() + 30;
+            while (performance.now() < batchEnd) {
+                count++;
+                const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
+                const result = runHeadlessSimulation(seed, playerConfigs, screenW, screenH, maxFrames);
+                if (result.completed && simulationMatchesCriteria(result)) {
+                    foundSeed = seed;
+                    break;
+                }
+                if (count >= HARD_LIMIT) break;
+            }
+            counter.textContent = String(count);
+            if (foundSeed !== null) {
+                overlay.classList.add('hidden');
+                simulationActive = false;
+                showCountdownThen(() => {
+                    startGame(playerConfigs, bg_settings, { seed: foundSeed });
+                });
+                resolve(true);
+                return;
+            }
+            if (count >= HARD_LIMIT) {
+                overlay.classList.add('hidden');
+                simulationActive = false;
+                alert('Не удалось подобрать игру по заданным критериям. Попробуйте смягчить условия.');
+                resolve(false);
+                return;
+            }
+            requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+    });
+}
+
+async function loadGameAssets() {
+    if (assetsLoaded) return;
+    if (!audioCtx) audioCtx = new AudioContext();
+    if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
+
+    const soundUrls = {
+        hit_border: 'assets/sounds/hit_border.ogg',
+        pop: ['assets/sounds/pop1.ogg', 'assets/sounds/pop2.ogg', 'assets/sounds/pop3.ogg', 'assets/sounds/pop4.ogg', 'assets/sounds/pop5.ogg'],
+        sword_hit: ['assets/sounds/swordhit1.ogg', 'assets/sounds/swordhit2.ogg', 'assets/sounds/swordhit3.ogg', 'assets/sounds/swordhit4.ogg', 'assets/sounds/swordhit5.ogg', 'assets/sounds/swordhit6.ogg', 'assets/sounds/swordhit7.ogg'],
+        sword_out: ['assets/sounds/swordout1.ogg', 'assets/sounds/swordout2.ogg']
+    };
+
+    const [loaded_saw, loaded_heart, hit_sound, pop_sounds, sword_hit_sounds, sword_out_sounds] = await Promise.all([
+        loadImage('assets/images/saw.png'),
+        loadImage('assets/images/heart.png'),
+        loadSound(soundUrls.hit_border, audioCtx),
+        Promise.all(soundUrls.pop.map(url => loadSound(url, audioCtx))),
+        Promise.all(soundUrls.sword_hit.map(url => loadSound(url, audioCtx))),
+        Promise.all(soundUrls.sword_out.map(url => loadSound(url, audioCtx)))
+    ]);
+
+    raw_saw_img = loaded_saw || createPlaceholderImage(40, '#969696');
+    raw_heart_img = loaded_heart || createPlaceholderImage(35, '#ff69b4');
+    allSounds = {
+        hit_border: hit_sound,
+        pop: pop_sounds.filter(Boolean),
+        sword_hit: sword_hit_sounds.filter(Boolean),
+        sword_out: sword_out_sounds.filter(Boolean)
+    };
+    assetsLoaded = true;
+}
+
+async function ensurePlayerAvatars() {
+    for (let i = 0; i < playersData.length; i++) {
+        await refreshPlayerPreview(i);
+    }
+}
+
+async function handleStartGame() {
+    const status = document.getElementById('loading-status');
+    status.classList.remove('hidden');
+    try {
+        const bgToggle = document.getElementById('bg-type-toggle');
+        const bg_settings = { type: bgToggle.checked ? 'gradient' : 'solid' };
+        if (bg_settings.type === 'solid') {
+            bg_settings.color1 = document.getElementById('bg-color').value;
+        } else {
+            bg_settings.color1 = document.getElementById('bg-gradient-1').value;
+            bg_settings.color2 = document.getElementById('bg-gradient-2').value;
+        }
+
+        await loadGameAssets();
+        await ensurePlayerAvatars();
+        const playerConfigs = buildPlayerConfigsForGame();
+        status.classList.add('hidden');
+
+        if (riggedSettings.enabled && document.getElementById('rigged-checkbox').checked) {
+            await runRiggedSearchAndStart(playerConfigs, bg_settings);
+        } else {
+            startGame(playerConfigs, bg_settings, {});
+        }
+    } catch (error) {
+        status.textContent = "Ошибка загрузки ресурсов. Попробуйте обновить страницу.";
+        alert("Произошла ошибка при загрузке ресурсов. Убедитесь, что все файлы на месте и проверьте консоль (F12).");
+        console.error("Loading Error:", error);
+    }
+}
+
+window.onload = async () => {
+    ensurePlayersDataInitialised();
 
     const playerModal = document.getElementById('player-modal');
     const arenaModal = document.getElementById('arena-modal');
+    const gameSettingsModal = document.getElementById('game-settings-modal');
+    const riggedModal = document.getElementById('rigged-modal');
     const bgToggle = document.getElementById('bg-type-toggle');
     const avatarToggle = document.getElementById('avatar-source-toggle');
     playerModal.classList.add('hidden');
     arenaModal.classList.add('hidden');
+    gameSettingsModal.classList.add('hidden');
+    riggedModal.classList.add('hidden');
+    document.getElementById('simulation-overlay').classList.add('hidden');
+    document.getElementById('countdown-overlay').classList.add('hidden');
 
-    await updateAndDrawPlayerPreview(1);
-    await updateAndDrawPlayerPreview(2);
+    renderPlayersGrid();
+    applySettingsToSliders();
+    wireUpSliders();
 
-    document.getElementById('p1-settings-btn').addEventListener('click', () => openPlayerModal(1));
-    document.getElementById('p2-settings-btn').addEventListener('click', () => openPlayerModal(2));
+    document.getElementById('toggle-multi-mode-btn').addEventListener('click', () => setMultiMode(!multiPlayerMode));
+    document.getElementById('add-player-btn').addEventListener('click', addPlayer);
+    document.getElementById('remove-player-btn').addEventListener('click', removeLastPlayer);
+
     document.getElementById('arena-settings-btn').addEventListener('click', () => arenaModal.classList.remove('hidden'));
-    document.getElementById('close-player-modal-btn').addEventListener('click', saveAndClosePlayerModal);
     document.getElementById('close-arena-modal-btn').addEventListener('click', () => arenaModal.classList.add('hidden'));
-    
+
+    document.getElementById('close-player-modal-btn').addEventListener('click', () => { saveAndClosePlayerModal(); });
+
+    document.getElementById('game-settings-btn').addEventListener('click', () => { applySettingsToSliders(); gameSettingsModal.classList.remove('hidden'); });
+    document.getElementById('close-game-settings-btn').addEventListener('click', () => gameSettingsModal.classList.add('hidden'));
+    document.getElementById('reset-game-settings-btn').addEventListener('click', () => {
+        gameSettings = Object.assign({}, DEFAULT_GAME_SETTINGS);
+        applySettingsToSliders();
+    });
+
+    document.getElementById('rigged-checkbox').addEventListener('change', (e) => {
+        if (e.target.checked) {
+            openRiggedModal();
+        } else {
+            riggedSettings.enabled = false;
+        }
+    });
+    document.getElementById('save-rigged-btn').addEventListener('click', () => closeRiggedModal(true));
+    document.getElementById('cancel-rigged-btn').addEventListener('click', () => closeRiggedModal(false));
+    document.getElementById('rg-comeback').addEventListener('change', (e) => {
+        document.getElementById('rg-comeback-group').classList.toggle('hidden', !e.target.checked);
+    });
+    document.getElementById('rg-comeback-hp').addEventListener('input', (e) => {
+        document.getElementById('rg-comeback-hp-val').textContent = e.target.value;
+    });
+    document.getElementById('cancel-sim-btn').addEventListener('click', () => { simulationCancelled = true; });
+
     avatarToggle.addEventListener('change', () => {
         document.getElementById('avatar-url-group').classList.toggle('hidden', avatarToggle.checked);
         document.getElementById('avatar-file-group').classList.toggle('hidden', !avatarToggle.checked);
@@ -621,6 +1582,37 @@ window.onload = async () => {
         document.getElementById('solid-color-group').classList.toggle('hidden', bgToggle.checked);
         document.getElementById('gradient-color-group').classList.toggle('hidden', !bgToggle.checked);
     });
+
+    // Sound clear buttons + meta updates inside the player modal.
+    const attackInput = document.getElementById('modal-p-attack-sound');
+    const damageInput = document.getElementById('modal-p-damage-sound');
+    attackInput.addEventListener('change', () => {
+        const f = attackInput.files[0];
+        document.getElementById('modal-p-attack-sound-meta').textContent = f ? `Файл: ${f.name}` : 'Файл не выбран';
+    });
+    damageInput.addEventListener('change', () => {
+        const f = damageInput.files[0];
+        document.getElementById('modal-p-damage-sound-meta').textContent = f ? `Файл: ${f.name}` : 'Файл не выбран';
+    });
+    document.getElementById('modal-p-attack-sound-clear').addEventListener('click', () => {
+        if (currentPlayerEditing === null) return;
+        const data = playersData[currentPlayerEditing];
+        if (!data) return;
+        data.attackSoundFile = null;
+        data.attackSoundBuffer = null;
+        document.getElementById('modal-p-attack-sound').value = '';
+        document.getElementById('modal-p-attack-sound-meta').textContent = 'Файл не выбран';
+    });
+    document.getElementById('modal-p-damage-sound-clear').addEventListener('click', () => {
+        if (currentPlayerEditing === null) return;
+        const data = playersData[currentPlayerEditing];
+        if (!data) return;
+        data.damageSoundFile = null;
+        data.damageSoundBuffer = null;
+        document.getElementById('modal-p-damage-sound').value = '';
+        document.getElementById('modal-p-damage-sound-meta').textContent = 'Файл не выбран';
+    });
+
     const presetsContainer = document.getElementById('modal-p-color-presets');
     const modalColorPicker = document.getElementById('modal-p-color');
     for (const [name, color] of Object.entries(PRESET_COLORS)) {
@@ -631,6 +1623,7 @@ window.onload = async () => {
         swatch.addEventListener('click', () => modalColorPicker.value = color);
         presetsContainer.appendChild(swatch);
     }
+
     canvas.addEventListener('click', (event) => {
         if (!mainMenuButton.visible) return;
         const rect = canvas.getBoundingClientRect();
@@ -638,8 +1631,6 @@ window.onload = async () => {
         const mouseY = (event.clientY - rect.top);
         if (checkCollision({x: mouseX, y: mouseY, width: 1, height: 1}, mainMenuButton.rect)) {
             resetToMainMenu();
-            drawPreviewBall(1);
-            drawPreviewBall(2);
         }
     });
     canvas.addEventListener('mousemove', (event) => {
@@ -649,70 +1640,11 @@ window.onload = async () => {
         const mouseY = (event.clientY - rect.top);
         canvas.style.cursor = checkCollision({x: mouseX, y: mouseY, width: 1, height: 1}, mainMenuButton.rect) ? 'pointer' : 'default';
     });
+
     document.getElementById('start-game-btn').addEventListener('click', async () => {
         if (!audioCtx) audioCtx = new AudioContext();
-        if (audioCtx.state === 'suspended') { await audioCtx.resume(); }
-        const status = document.getElementById('loading-status');
-        status.classList.remove('hidden');
-        try {
-            const bg_settings = { type: bgToggle.checked ? 'gradient' : 'solid' };
-            if (bg_settings.type === 'solid') {
-                bg_settings.color1 = document.getElementById('bg-color').value;
-            } else {
-                bg_settings.color1 = document.getElementById('bg-gradient-1').value;
-                bg_settings.color2 = document.getElementById('bg-gradient-2').value;
-            }
-
-            // ИЗМЕНЕНО: Загружаем все ресурсы из файлов, используя новые функции
-            const soundUrls = {
-                hit_border: 'assets/sounds/hit_border.ogg',
-                pop: [
-                    'assets/sounds/pop1.ogg', 'assets/sounds/pop2.ogg', 'assets/sounds/pop3.ogg', 
-                    'assets/sounds/pop4.ogg', 'assets/sounds/pop5.ogg'
-                ],
-                sword_hit: [
-                    'assets/sounds/swordhit1.ogg', 'assets/sounds/swordhit2.ogg', 'assets/sounds/swordhit3.ogg',
-                    'assets/sounds/swordhit4.ogg', 'assets/sounds/swordhit5.ogg', 'assets/sounds/swordhit6.ogg', 'assets/sounds/swordhit7.ogg'
-                ],
-                sword_out: ['assets/sounds/swordout1.ogg', 'assets/sounds/swordout2.ogg']
-            };
-
-            const [loaded_saw, loaded_heart, hit_sound, pop_sounds, sword_hit_sounds, sword_out_sounds] = await Promise.all([
-                loadImage('assets/images/saw.png'),
-                loadImage('assets/images/heart.png'),
-                loadSound(soundUrls.hit_border, audioCtx),
-                Promise.all(soundUrls.pop.map(url => loadSound(url, audioCtx))),
-                Promise.all(soundUrls.sword_hit.map(url => loadSound(url, audioCtx))),
-                Promise.all(soundUrls.sword_out.map(url => loadSound(url, audioCtx)))
-            ]);
-
-            raw_saw_img = loaded_saw || createPlaceholderImage(40, '#969696');
-            raw_heart_img = loaded_heart || createPlaceholderImage(35, '#ff69b4');
-            allSounds = {
-                hit_border: hit_sound, 
-                pop: pop_sounds.filter(s => s),
-                sword_hit: sword_hit_sounds.filter(s => s), 
-                sword_out: sword_out_sounds.filter(s => s)
-            };
-            
-            const p1_data = { 
-                name: document.getElementById('p1-name').value, 
-                color: document.getElementById('p1-color-picker').value, 
-                image: p1_preview_image 
-            };
-            const p2_data = { 
-                name: document.getElementById('p2-name').value, 
-                color: document.getElementById('p2-color-picker').value, 
-                image: p2_preview_image
-            };
-
-            status.classList.add('hidden');
-            startGame(p1_data, p2_data, bg_settings);
-        } catch (error) {
-            status.textContent = "Ошибка загрузки ресурсов. Попробуйте обновить страницу.";
-            alert("Произошла ошибка при загрузке ресурсов. Убедитесь, что все файлы на месте и проверьте консоль (F12).");
-            console.error("Loading Error:", error);
-        }
+        if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
+        await handleStartGame();
     });
 };
 </script>
