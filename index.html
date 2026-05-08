@@ -196,6 +196,14 @@
         </div>
         <div id="avatar-url-group" class="form-group"><label for="modal-p-image-url">URL фото:</label><input type="text" id="modal-p-image-url" placeholder="https://example.com/photo.png"></div>
         <div id="avatar-file-group" class="form-group hidden"><label for="modal-p-image-file">Файл фото:</label><input type="file" id="modal-p-image-file" accept="image/*"></div>
+        <div class="range-row" style="margin-top: 12px;">
+            <div class="range-header"><span class="range-name">Здоровье (HP)</span><span class="range-value" id="modal-p-hp-val">5</span></div>
+            <input type="range" id="modal-p-hp" min="1" max="20" step="1" value="5">
+        </div>
+        <div class="range-row">
+            <div class="range-header"><span class="range-name">Множитель размера</span><span class="range-value" id="modal-p-size-val">×1.00</span></div>
+            <input type="range" id="modal-p-size" min="0.3" max="3" step="0.05" value="1">
+        </div>
         <div class="sound-section">
             <h4>Свои звуки</h4>
             <div class="sound-row">
@@ -345,6 +353,9 @@ const MAX_GAME_WIDTH = 800;
 
 const GREY = "#323232", WHITE = "#ffffff", SAW_COLOR = "#969696";
 const FPS = 60, MAX_HP = 5;
+// Fixed-step physics; renderer runs at native display refresh.
+const PHYSICS_STEP_MS = 1000 / FPS;
+let physics_accumulator = 0;
 
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
@@ -424,16 +435,17 @@ class Vector2 { constructor(x = 0, y = 0) { this.x = x; this.y = y; } add(v) { r
 class Particle { constructor(x, y, colors, count, min_speed, max_speed, gravity, lifetime_range, size_range) { this.particles = []; for (let i = 0; i < count; i++) { const angle = Math.random() * 2 * Math.PI; const speed = min_speed + Math.random() * (max_speed - min_speed); this.particles.push({ pos: new Vector2(x, y), vel: new Vector2(Math.cos(angle) * speed, Math.sin(angle) * speed), life: lifetime_range[0] + Math.random() * (lifetime_range[1] - lifetime_range[0]), max_life: lifetime_range[1], color: colors[Math.floor(Math.random() * colors.length)], size: size_range[0] + Math.random() * (size_range[1] - size_range[0]) }); } this.gravity = gravity; } update() { for (const p of this.particles) { p.pos = p.pos.add(p.vel); p.vel.y += this.gravity; p.life -= 1; } this.particles = this.particles.filter(p => p.life > 0); } draw(surface) { surface.globalCompositeOperation = 'lighter'; for (const p of this.particles) { const alpha = p.life / p.max_life; if (alpha <= 0) continue; const size = p.size * alpha; if (size < 1) continue; surface.fillStyle = p.color; surface.globalAlpha = alpha; surface.beginPath(); surface.arc(p.pos.x, p.pos.y, size, 0, 2 * Math.PI); surface.fill(); } surface.globalAlpha = 1.0; surface.globalCompositeOperation = 'source-over'; } }
 class PowerUp { constructor(x, y, type) { this.type = type; const size = this.type === 'heart' ? 35 : 40; this.rect = { x: x, y: y, width: size, height: size }; this.image = type === 'saw' ? raw_saw_img : raw_heart_img; this.angle = 0; this.pulse_phase = 0; this.pulse_timer = Math.floor(Math.random() * 45); } update() { if (this.type === 'saw') { this.angle -= 12; } else { this.pulse_timer -= 1; if (this.pulse_timer <= 0) { this.pulse_timer = 0.75 * FPS; if (this.pulse_phase <= 0) this.pulse_phase = Math.PI; } if (this.pulse_phase > 0) { this.pulse_phase -= 0.4; } } } draw(surface) { const centerX = this.rect.x + this.rect.width / 2; const centerY = this.rect.y + this.rect.height / 2; if (this.type === 'saw') { surface.save(); surface.translate(centerX, centerY); surface.rotate(this.angle * Math.PI / 180); surface.drawImage(this.image, -this.rect.width / 2, -this.rect.height / 2, this.rect.width, this.rect.height); surface.restore(); } else { let scale = 1.0; if (this.pulse_phase > 0) { scale = 1.0 + 0.25 * Math.sin(this.pulse_phase); } const w = this.rect.width * scale; const h = this.rect.height * scale; surface.drawImage(this.image, centerX - w / 2, centerY - h / 2, w, h); } } }
 class Ball {
-    constructor(x, y, base_image, color, name, initial_diameter, headless) {
+    constructor(x, y, base_image, color, name, initial_diameter, headless, max_hp) {
         this.pos = new Vector2(x, y);
         const speedMul = gameSettings.ballSpeed;
         this.vel = new Vector2(rng() * 2 - 1, rng() * 2 - 1).normalize().multiply((7 + rng() * 5) * speedMul);
         this.base_image = base_image;
         this.color = color;
         this.name = name;
-        this.hp = MAX_HP;
-        this.display_hp = MAX_HP;
-        this.min_hp_seen = MAX_HP; // for comeback detection in simulation
+        this.max_hp = Math.max(1, Math.floor(max_hp || MAX_HP));
+        this.hp = this.max_hp;
+        this.display_hp = this.max_hp;
+        this.min_hp_seen = this.max_hp; // for comeback detection in simulation
         this.is_attacking = false;
         this.saw_angle = 0;
         this.initial_diameter = initial_diameter;
@@ -442,6 +454,8 @@ class Ball {
         this.image = null;
         this.headless = !!headless;
         this.alive_index = 0; // assigned externally
+        // Always set radius (collisions / wall bounds rely on it, even in headless mode).
+        this.radius = Math.max(10, this.initial_diameter * this.current_scale) / 2;
         if (!this.headless) this.recreate_surface();
     }
     recreate_surface() {
@@ -470,10 +484,11 @@ class Ball {
         this.image = ballCanvas;
     }
     update_hp(amount) {
-        this.hp = Math.max(0, Math.min(MAX_HP, this.hp + amount));
+        this.hp = Math.max(0, Math.min(this.max_hp, this.hp + amount));
         if (this.hp < this.min_hp_seen) this.min_hp_seen = this.hp;
         const min_scale = 0.5, max_scale = 1.0;
-        this.target_scale = (this.hp <= 0) ? min_scale : (min_scale + (max_scale - min_scale) * ((this.hp - 1) / (MAX_HP - 1)));
+        const denom = Math.max(1, this.max_hp - 1);
+        this.target_scale = (this.hp <= 0) ? min_scale : (min_scale + (max_scale - min_scale) * ((this.hp - 1) / denom));
     }
     update(bounds, trigger_shake) {
         if (!this.headless) {
@@ -648,8 +663,6 @@ function draw_ui(surface, balls) {
     const bar_margin = 20;
     const bar_total_width = SCREEN_WIDTH - (bar_margin * 2);
     const bar_height = 10;
-    const spacing = 5;
-    const cell_width = (bar_total_width - spacing * (MAX_HP - 1)) / MAX_HP;
     const x_start = bar_margin;
     const n = balls.length;
     // Per-player vertical slot. With 2 players use the original 65px spacing; with more,
@@ -661,11 +674,15 @@ function draw_ui(surface, balls) {
     surface.textAlign = "center";
     for (let p = 0; p < n; p++) {
         const ball = balls[p];
+        const max_hp = ball.max_hp || MAX_HP;
+        // Spacing scales with cell count so wide rows don't visually drown out HP fill.
+        const spacing = max_hp <= 8 ? 5 : (max_hp <= 14 ? 3 : 2);
+        const cell_width = Math.max(2, (bar_total_width - spacing * (max_hp - 1)) / max_hp);
         const y_pos = top_y + p * slot_h;
         surface.fillStyle = WHITE;
         surface.fillText(ball.name, SCREEN_WIDTH / 2, y_pos - 8);
         const hp_val = ball.hp <= 0 ? 0 : ball.display_hp;
-        for (let i = 0; i < MAX_HP; i++) {
+        for (let i = 0; i < max_hp; i++) {
             const cell_x = x_start + i * (cell_width + spacing);
             const hp_in_this_cell = Math.max(0, Math.min(1, hp_val - i));
             const fill_width = cell_width * hp_in_this_cell;
@@ -772,7 +789,9 @@ function initGameState(playerConfigs, images, screenW, screenH, headless) {
     for (let i = 0; i < n; i++) {
         const cfg = playerConfigs[i];
         const img = (images && images[i]) || null;
-        const ball = new Ball(positions[i].x, positions[i].y, img, cfg.color, cfg.name, game_ball_diameter, headless);
+        const sizeMul = (cfg && typeof cfg.size_mul === 'number') ? cfg.size_mul : 1.0;
+        const maxHp = (cfg && typeof cfg.max_hp === 'number') ? cfg.max_hp : MAX_HP;
+        const ball = new Ball(positions[i].x, positions[i].y, img, cfg.color, cfg.name, game_ball_diameter * sizeMul, headless, maxHp);
         ball.alive_index = i;
         players.push(ball);
     }
@@ -940,22 +959,32 @@ function updateGameStep(headless) {
 function game_loop(timestamp) {
     if (!running) return;
     requestAnimationFrame(game_loop);
-    const delta_time = timestamp - last_time;
-    if (delta_time < 1000 / FPS) return;
-    last_time = timestamp;
 
+    // Decouple physics (fixed 60Hz) from rendering (display refresh, e.g. 120Hz).
+    if (last_time === 0) last_time = timestamp;
+    let delta_time = timestamp - last_time;
+    last_time = timestamp;
+    // Cap dt after a tab unfreeze so we don't spiral the simulation.
+    if (delta_time > 250) delta_time = 250;
+    physics_accumulator += delta_time;
+
+    while (physics_accumulator >= PHYSICS_STEP_MS) {
+        physics_accumulator -= PHYSICS_STEP_MS;
+        if (screen_shake > 0) screen_shake--;
+        updateGameStep(false);
+        // Particles tick once per physics step (consistent regardless of refresh rate).
+        for (const part of particles_list) part.update();
+        particles_list = particles_list.filter(p => p.particles.length > 0);
+        if (game_over && gameOverTime && Date.now() - gameOverTime > 4000) {
+            mainMenuButton.visible = true;
+        }
+    }
+
+    // Render every animation frame at the display's native refresh rate.
     ctx.save();
     drawBackground(ctx);
     if (screen_shake > 0) {
-        screen_shake--;
         ctx.translate(Math.random() * screen_shake * 2 - screen_shake, Math.random() * screen_shake * 2 - screen_shake);
-    }
-
-    updateGameStep(false);
-
-    // Show "main menu" button after game over.
-    if (game_over && gameOverTime && Date.now() - gameOverTime > 4000) {
-        mainMenuButton.visible = true;
     }
 
     // Rainbow border (visual only).
@@ -968,8 +997,7 @@ function game_loop(timestamp) {
     for (const p of players) {
         if (p.hp > 0 || winner === p) p.draw(ctx);
     }
-    particles_list.forEach(p => { p.update(); p.draw(ctx); });
-    particles_list = particles_list.filter(p => p.particles.length > 0);
+    for (const part of particles_list) part.draw(ctx);
 
     ctx.restore();
     draw_ui(ctx, players);
@@ -1060,6 +1088,8 @@ function makeDefaultPlayer(idx) {
         imageUrl: '',
         imageFile: null,
         previewImage: null,
+        maxHp: 5,
+        sizeMul: 1.0,
         attackSoundFile: null,
         attackSoundBuffer: null,
         attackMixWithSystem: false,
@@ -1216,6 +1246,14 @@ function openPlayerModal(idx) {
     document.getElementById('avatar-url-group').classList.toggle('hidden', useFile);
     document.getElementById('avatar-file-group').classList.toggle('hidden', !useFile);
 
+    // Per-player HP and size multiplier
+    const hpInput = document.getElementById('modal-p-hp');
+    const sizeInput = document.getElementById('modal-p-size');
+    hpInput.value = String(data.maxHp != null ? data.maxHp : 5);
+    document.getElementById('modal-p-hp-val').textContent = String(hpInput.value);
+    sizeInput.value = String(data.sizeMul != null ? data.sizeMul : 1.0);
+    document.getElementById('modal-p-size-val').textContent = `×${Number(sizeInput.value).toFixed(2)}`;
+
     // Sound state
     document.getElementById('modal-p-attack-sound').value = '';
     document.getElementById('modal-p-attack-sound-meta').textContent = data.attackSoundFile ? `Файл: ${data.attackSoundFile.name}` : 'Файл не выбран';
@@ -1235,6 +1273,10 @@ async function saveAndClosePlayerModal() {
 
     data.name = document.getElementById('modal-p-name').value || `Игрок ${idx + 1}`;
     data.color = document.getElementById('modal-p-color').value;
+    const hpVal = parseInt(document.getElementById('modal-p-hp').value, 10);
+    if (!Number.isNaN(hpVal)) data.maxHp = Math.max(1, hpVal);
+    const sizeVal = parseFloat(document.getElementById('modal-p-size').value);
+    if (!Number.isNaN(sizeVal)) data.sizeMul = Math.max(0.1, sizeVal);
     const useFile = document.getElementById('avatar-source-toggle').checked;
     const fileInput = document.getElementById('modal-p-image-file');
     const urlInput = document.getElementById('modal-p-image-url');
@@ -1352,6 +1394,8 @@ function buildPlayerConfigsForGame() {
         name: d.name || `Игрок ${i + 1}`,
         color: d.color,
         image: d.previewImage,
+        max_hp: Math.max(1, parseInt(d.maxHp != null ? d.maxHp : 5, 10) || 5),
+        size_mul: Math.max(0.1, parseFloat(d.sizeMul != null ? d.sizeMul : 1) || 1),
         index: i
     }));
 }
@@ -1573,6 +1617,15 @@ window.onload = async () => {
         document.getElementById('rg-comeback-hp-val').textContent = e.target.value;
     });
     document.getElementById('cancel-sim-btn').addEventListener('click', () => { simulationCancelled = true; });
+
+    // Live readout for per-player HP and size sliders inside the player modal.
+    document.getElementById('modal-p-hp').addEventListener('input', (e) => {
+        document.getElementById('modal-p-hp-val').textContent = e.target.value;
+    });
+    document.getElementById('modal-p-size').addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        document.getElementById('modal-p-size-val').textContent = `×${(Number.isNaN(v) ? 1 : v).toFixed(2)}`;
+    });
 
     avatarToggle.addEventListener('change', () => {
         document.getElementById('avatar-url-group').classList.toggle('hidden', avatarToggle.checked);
