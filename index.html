@@ -232,7 +232,11 @@
             <span>Загрузить из файла</span>
         </div>
         <div id="avatar-url-group" class="form-group"><label for="modal-p-image-url">URL фото:</label><input type="text" id="modal-p-image-url" placeholder="https://example.com/photo.png"></div>
-        <div id="avatar-file-group" class="form-group hidden"><label for="modal-p-image-file">Файл фото:</label><input type="file" id="modal-p-image-file" accept="image/*"></div>
+        <div id="avatar-file-group" class="form-group hidden">
+            <label for="modal-p-image-file">Файл фото:</label>
+            <input type="file" id="modal-p-image-file" accept="image/*">
+            <div class="sound-meta" id="modal-p-image-file-meta">Файл не выбран.</div>
+        </div>
         <button id="open-unique-modal-btn" type="button" style="margin-bottom: 12px;">Уникальные настройки</button>
         <div class="sound-section">
             <h4>Свои звуки</h4>
@@ -340,6 +344,7 @@
             <input type="range" id="uniq-speed" min="0.3" max="3" step="0.05" value="1">
         </div>
         <div class="modal-buttons">
+            <button id="uniq-reset-btn" class="danger">Сбросить</button>
             <button id="uniq-cancel-btn" class="danger">Отмена</button>
             <button id="uniq-save-btn">Готово</button>
         </div>
@@ -370,6 +375,10 @@
             <div class="range-row" style="margin-top: 10px;">
                 <div class="range-header"><span class="range-name">Минимальный уровень HP победителя</span><input type="number" class="range-value-input" id="rg-comeback-hp-num" step="1" value="1"></div>
                 <input type="range" id="rg-comeback-hp" min="1" max="4" step="1" value="1">
+            </div>
+            <div class="checkbox-row" id="rg-loser-max-row" style="margin-top: 8px;">
+                <input type="checkbox" id="rg-loser-max-hp">
+                <label for="rg-loser-max-hp">При этом у второго игрока должно быть максимум HP</label>
             </div>
         </div>
         <div class="modal-buttons">
@@ -478,7 +487,11 @@ let riggedSettings = {
     maxTime: 120,
     winnerIndex: 0,
     comeback: false,
-    comebackHp: 1
+    comebackHp: 1,
+    // Two-player only: at the moment the winner's HP was at its lowest (≤ comebackHp),
+    // the loser must have been at FULL max HP. Headless sim tracks min_hp_when_others_at_max
+    // per player so this can be checked retroactively.
+    loserMustHaveMaxHp: false
 };
 let simulationActive = false, simulationCancelled = false;
 
@@ -514,6 +527,10 @@ class Ball {
         this.hp = this.max_hp;
         this.display_hp = this.max_hp;
         this.min_hp_seen = this.max_hp; // for comeback detection in simulation
+        // Lowest HP this ball ever had during a frame where every OTHER alive
+        // ball was simultaneously at full max HP. Used by the rigged-game
+        // "loser must have max HP at the comeback moment" criterion.
+        this.min_hp_when_others_at_max = this.max_hp;
         this.is_attacking = false;
         this.saw_angle = 0;
         this.initial_diameter = initial_diameter;
@@ -662,10 +679,34 @@ function roundedRectPath(ctx, x, y, w, h, r) {
 }
 function createPlaceholderImage(size, color) { const canvas = document.createElement('canvas'); canvas.width = size; canvas.height = size; const ctx = canvas.getContext('2d'); ctx.beginPath(); ctx.arc(size / 2, size / 2, size / 2, 0, 2 * Math.PI); ctx.fillStyle = darkenColor(color, 40); ctx.fill(); return canvas; }
 function cropToSquare(image) { const size = Math.min(image.width, image.height); const sx = (image.width - size) / 2; const sy = (image.height - size) / 2; const tempCanvas = document.createElement('canvas'); tempCanvas.width = size; tempCanvas.height = size; const tempCtx = tempCanvas.getContext('2d'); tempCtx.drawImage(image, sx, sy, size, size, 0, 0, size, size); return tempCanvas; }
-function getImage(file, url, color) { 
+// Read a File as a data: URL. Used to snapshot a picked image so it survives
+// any subsequent state changes (file inputs lose their value on mobile after
+// the modal is closed; File objects can become stale).
+function readFileAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+        if (!file) { resolve(''); return; }
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result || '');
+        reader.onerror = () => reject(new Error('FileReader failed'));
+        reader.readAsDataURL(file);
+    });
+}
+function getImage(file, url, color) {
     return new Promise((resolve) => {
         const createPlaceholder = () => resolve(createPlaceholderImage(128, color));
-        if (file) {
+        // URL takes precedence — it can be either an http(s) URL OR a data:
+        // URL cached from a previously-picked file. Both load via Image.src.
+        if (url) {
+            const img = new Image();
+            // crossOrigin is only needed for cross-origin http(s) loads.
+            if (!url.startsWith('data:')) img.crossOrigin = "anonymous";
+            img.onload = () => resolve(cropToSquare(img));
+            img.onerror = () => {
+                console.warn(`Failed to load image from URL.`);
+                resolve(createPlaceholderImage(128, color));
+            };
+            img.src = url;
+        } else if (file) {
             const reader = new FileReader();
             reader.onload = (e) => {
                 const img = new Image();
@@ -673,16 +714,8 @@ function getImage(file, url, color) {
                 img.onerror = createPlaceholder;
                 img.src = e.target.result;
             };
+            reader.onerror = createPlaceholder;
             reader.readAsDataURL(file);
-        } else if (url) {
-            const img = new Image();
-            img.crossOrigin = "anonymous";
-            img.onload = () => resolve(cropToSquare(img));
-            img.onerror = () => {
-                console.warn(`CORS error loading image from URL.`);
-                resolve(createPlaceholderImage(128, color));
-            };
-            img.src = url;
         } else {
             createPlaceholder();
         }
@@ -1105,6 +1138,25 @@ function updateGameStep(headless) {
     // Update powerup visuals (rotation/pulse). Doesn't affect simulation.
     if (!headless) powerups.forEach(p => p.update());
 
+    // Per-frame: for each ALIVE player p, if every OTHER alive player is at full
+    // max HP, record p's current HP. The minimum across the match is the lowest
+    // HP p ever reached while everyone else was simultaneously at max HP — used
+    // by the rigged-game "loser must have max HP at the comeback moment" check.
+    if (headless) {
+        for (const p of players) {
+            if (p.hp <= 0) continue;
+            let othersAllMax = true;
+            for (const q of players) {
+                if (q === p) continue;
+                if (q.hp <= 0) { othersAllMax = false; break; }
+                if (q.hp !== q.max_hp) { othersAllMax = false; break; }
+            }
+            if (othersAllMax && p.hp < p.min_hp_when_others_at_max) {
+                p.min_hp_when_others_at_max = p.hp;
+            }
+        }
+    }
+
     // Win condition: only one player with hp > 0 (or all dead — last killed wins).
     const alive = players.filter(p => p.hp > 0);
     if (alive.length <= 1 && !game_over) {
@@ -1207,11 +1259,13 @@ function runHeadlessSimulation(seed, playerConfigs, screenW, screenH, maxFrames)
     }
     const winnerIdx = winner ? winner.alive_index : -1;
     const minHpPerPlayer = players.map(p => p.min_hp_seen);
+    const minHpWhenOthersAtMax = players.map(p => p.min_hp_when_others_at_max);
     return {
         seed,
         winnerIdx,
         durationSec: frame / FPS,
         minHpPerPlayer,
+        minHpWhenOthersAtMax,
         completed: game_over
     };
 }
@@ -1264,6 +1318,9 @@ function makeDefaultPlayer(idx) {
         color: DEFAULT_PLAYER_COLORS[idx % DEFAULT_PLAYER_COLORS.length],
         imageUrl: '',
         imageFile: null,
+        // Persistent snapshot of a picked file as a data: URL. Survives modal
+        // close, page state changes, and stale File references on mobile.
+        imageDataUrl: '',
         previewImage: null,
         maxHp: 5,
         sizeMul: 1.0,
@@ -1319,7 +1376,10 @@ function drawPreviewBallOnCanvas(canvas, color, name, avatar) {
 async function refreshPlayerPreview(idx) {
     const data = playersData[idx];
     if (!data) return;
-    const newImage = await getImage(data.imageFile, data.imageUrl, data.color);
+    // Prefer the persistent data URL (set when a file was picked) over the raw
+    // File object — the data URL always works, the File can become stale.
+    const url = data.imageDataUrl || data.imageUrl || '';
+    const newImage = await getImage(url ? null : data.imageFile, url, data.color);
     data.previewImage = newImage;
     const canvas = document.getElementById(`player-preview-canvas-${idx}`);
     if (canvas) drawPreviewBallOnCanvas(canvas, data.color, data.name, data.previewImage);
@@ -1400,6 +1460,7 @@ function addPlayer() {
     renderPlayersGrid();
     updateRiggedWinnerOptions();
 }
+// (winnerIndex auto-fixup happens in removeLastPlayer below)
 function removeLastPlayer() {
     if (!multiPlayerMode) return;
     if (playersData.length <= MIN_PLAYERS) return;
@@ -1419,10 +1480,21 @@ function openPlayerModal(idx) {
     document.getElementById('modal-p-image-url').value = data.imageUrl || '';
     document.getElementById('modal-p-image-file').value = '';
 
-    const useFile = !data.imageUrl;
+    // File mode is shown if either a picked-file data URL is cached OR no http URL.
+    const useFile = !!data.imageDataUrl || !data.imageUrl;
     document.getElementById('avatar-source-toggle').checked = useFile;
     document.getElementById('avatar-url-group').classList.toggle('hidden', useFile);
     document.getElementById('avatar-file-group').classList.toggle('hidden', !useFile);
+    // Show the user that a photo is currently saved (since the file input
+    // itself can't be programmatically populated and shows "no file chosen").
+    const meta = document.getElementById('modal-p-image-file-meta');
+    if (meta) {
+        if (data.imageDataUrl) {
+            meta.textContent = 'Фото уже выбрано — выберите новый файл, чтобы заменить.';
+        } else {
+            meta.textContent = 'Файл не выбран.';
+        }
+    }
 
     // Sound state
     document.getElementById('modal-p-attack-sound').value = '';
@@ -1453,12 +1525,22 @@ async function saveAndClosePlayerModal() {
     const urlInput = document.getElementById('modal-p-image-url');
     if (useFile) {
         if (fileInput.files.length > 0) {
-            data.imageFile = fileInput.files[0];
+            const file = fileInput.files[0];
+            data.imageFile = file;
             data.imageUrl = '';
+            // Snapshot to a data URL so the photo survives reopen even if the
+            // File reference becomes invalid (e.g. on mobile after input clear).
+            try { data.imageDataUrl = await readFileAsDataURL(file); }
+            catch (e) { console.warn('Failed to snapshot picked file', e); }
         }
+        // No new file picked — keep the previously stored imageDataUrl/imageFile.
     } else {
         data.imageUrl = urlInput.value.trim();
-        if (data.imageUrl) data.imageFile = null;
+        if (data.imageUrl) {
+            // Switched to a real URL — drop the cached file/data URL.
+            data.imageFile = null;
+            data.imageDataUrl = '';
+        }
     }
 
     data.attackMixWithSystem = document.getElementById('modal-p-attack-mix').checked;
@@ -1548,11 +1630,26 @@ function wireUpSliders() {
 }
 
 // --- Rigged settings ---
+const RANDOM_WINNER = -1; // riggedSettings.winnerIndex sentinel for "any player can win".
 function updateRiggedWinnerOptions() {
     const cont = document.getElementById('rg-winner-options');
     if (!cont) return;
     cont.innerHTML = '';
-    if (riggedSettings.winnerIndex >= playersData.length) riggedSettings.winnerIndex = 0;
+    if (riggedSettings.winnerIndex !== RANDOM_WINNER && riggedSettings.winnerIndex >= playersData.length) {
+        riggedSettings.winnerIndex = 0;
+    }
+
+    // "Random winner" option — any player may win, time/comeback constraints still apply.
+    const randomOpt = document.createElement('div');
+    randomOpt.className = 'winner-option' + (riggedSettings.winnerIndex === RANDOM_WINNER ? ' selected' : '');
+    randomOpt.textContent = 'Случайный';
+    randomOpt.addEventListener('click', () => {
+        riggedSettings.winnerIndex = RANDOM_WINNER;
+        updateRiggedWinnerOptions();
+        applyComebackBoundsForCurrentWinner();
+    });
+    cont.appendChild(randomOpt);
+
     playersData.forEach((data, idx) => {
         const opt = document.createElement('div');
         opt.className = 'winner-option' + (idx === riggedSettings.winnerIndex ? ' selected' : '');
@@ -1568,15 +1665,30 @@ function updateRiggedWinnerOptions() {
 }
 
 function applyComebackBoundsForCurrentWinner() {
-    const winnerData = playersData[riggedSettings.winnerIndex];
     const slider = document.getElementById('rg-comeback-hp');
     const numInput = document.getElementById('rg-comeback-hp-num');
     const cbInput = document.getElementById('rg-comeback');
     const cbGroup = document.getElementById('rg-comeback-group');
-    if (!winnerData || !slider) return;
-    const maxHp = Math.max(1, parseInt(winnerData.maxHp, 10) || 5);
+    if (!slider) return;
+
+    // For a fixed winner the cap is winner.maxHp − 1; for the random option it
+    // is the largest possible (max over all players) so any potential winner
+    // is reachable.
+    let maxHp;
+    if (riggedSettings.winnerIndex === RANDOM_WINNER) {
+        maxHp = playersData.reduce((acc, d) => {
+            const hp = parseInt(d.maxHp, 10) || 5;
+            return Math.max(acc, hp);
+        }, 1);
+    } else {
+        const winnerData = playersData[riggedSettings.winnerIndex];
+        if (!winnerData) return;
+        maxHp = Math.max(1, parseInt(winnerData.maxHp, 10) || 5);
+    }
+
     if (maxHp <= 1) {
-        // Comeback impossible — winner has only 1 HP.
+        // Comeback impossible — the only possible winner has 1 HP, so they can
+        // never "come back from low HP".
         cbInput.checked = false;
         cbInput.disabled = true;
         riggedSettings.comeback = false;
@@ -1586,21 +1698,32 @@ function applyComebackBoundsForCurrentWinner() {
     cbInput.disabled = false;
     slider.min = '1';
     slider.max = String(maxHp - 1);
-    // Slider position visually clamps to the winner's range; the number input
+    // Slider position visually clamps to the current range; the number input
     // keeps the user-typed value untouched so manual input always wins.
     let v = parseInt(numInput ? numInput.value : slider.value, 10);
     if (Number.isNaN(v)) v = 1;
     slider.value = String(Math.max(1, Math.min(maxHp - 1, v)));
 }
 
+// Show/hide the "loser must have max HP" row based on player count + comeback state.
+function applyLoserMaxRowVisibility() {
+    const row = document.getElementById('rg-loser-max-row');
+    if (!row) return;
+    const cb = document.getElementById('rg-comeback');
+    const visible = playersData.length === 2 && cb && cb.checked;
+    row.classList.toggle('hidden', !visible);
+}
+
 function openRiggedModal() {
     document.getElementById('rg-min-time').value = riggedSettings.minTime;
     document.getElementById('rg-max-time').value = riggedSettings.maxTime;
     document.getElementById('rg-comeback').checked = !!riggedSettings.comeback;
+    document.getElementById('rg-loser-max-hp').checked = !!riggedSettings.loserMustHaveMaxHp;
     setRangeAndNumber('rg-comeback-hp', 'rg-comeback-hp-num', riggedSettings.comebackHp, { integer: true });
     document.getElementById('rg-comeback-group').classList.toggle('hidden', !riggedSettings.comeback);
     updateRiggedWinnerOptions();
     applyComebackBoundsForCurrentWinner();
+    applyLoserMaxRowVisibility();
     document.getElementById('rigged-modal').classList.remove('hidden');
 }
 function closeRiggedModal(saved) {
@@ -1611,6 +1734,9 @@ function closeRiggedModal(saved) {
         riggedSettings.maxTime = maxT;
         riggedSettings.comeback = document.getElementById('rg-comeback').checked;
         riggedSettings.comebackHp = parseInt(document.getElementById('rg-comeback-hp-num').value, 10) || 1;
+        // Only meaningful for 2 players + comeback. Stored regardless so the
+        // user setting is remembered if they toggle players around.
+        riggedSettings.loserMustHaveMaxHp = document.getElementById('rg-loser-max-hp').checked;
         riggedSettings.enabled = true;
         document.getElementById('rigged-checkbox').checked = true;
     } else {
@@ -1692,13 +1818,22 @@ function validateBeforeStart() {
         if (!Number.isFinite(minT) || minT < 1) issues.push('Постановочная игра: мин. время должно быть ≥ 1.');
         if (!Number.isFinite(maxT) || maxT < minT) issues.push('Постановочная игра: макс. время должно быть ≥ мин. времени.');
         if (riggedSettings.comeback) {
-            const winner = playersData[riggedSettings.winnerIndex];
-            const winnerHp = winner ? parseFloat(winner.maxHp) : NaN;
             const cbHp = parseFloat(riggedSettings.comebackHp);
             if (!Number.isFinite(cbHp) || cbHp < 1 || Math.floor(cbHp) !== cbHp) {
                 issues.push('Постановочная игра: HP камбека должно быть целым числом ≥ 1.');
-            } else if (Number.isFinite(winnerHp) && cbHp > winnerHp - 1) {
-                issues.push(`Постановочная игра: HP камбека должно быть ≤ ${Math.max(1, winnerHp - 1)}.`);
+            } else if (riggedSettings.winnerIndex === RANDOM_WINNER) {
+                // For a random winner we can only reject values that exceed even
+                // the largest player's headroom. Anything below max-maxHp−1 is fine.
+                const cap = playersData.reduce((acc, d) => Math.max(acc, (parseFloat(d.maxHp) || 5) - 1), 0);
+                if (cap >= 1 && cbHp > cap) {
+                    issues.push(`Постановочная игра (случайный победитель): HP камбека должно быть ≤ ${cap}.`);
+                }
+            } else {
+                const winner = playersData[riggedSettings.winnerIndex];
+                const winnerHp = winner ? parseFloat(winner.maxHp) : NaN;
+                if (Number.isFinite(winnerHp) && cbHp > winnerHp - 1) {
+                    issues.push(`Постановочная игра: HP камбека должно быть ≤ ${Math.max(1, winnerHp - 1)}.`);
+                }
             }
         }
     }
@@ -1739,13 +1874,23 @@ function closeUniqueModal(save) {
 }
 
 function simulationMatchesCriteria(result) {
-    if (result.winnerIdx !== riggedSettings.winnerIndex) return false;
+    // Random winner mode accepts any non-null winner; otherwise enforce identity.
+    if (riggedSettings.winnerIndex !== RANDOM_WINNER && result.winnerIdx !== riggedSettings.winnerIndex) return false;
+    if (riggedSettings.winnerIndex === RANDOM_WINNER && (result.winnerIdx == null || result.winnerIdx < 0)) return false;
     if (result.durationSec < riggedSettings.minTime) return false;
     if (result.durationSec > riggedSettings.maxTime) return false;
     if (riggedSettings.comeback) {
         const winnerMin = result.minHpPerPlayer[result.winnerIdx];
         if (typeof winnerMin !== 'number') return false;
         if (winnerMin > riggedSettings.comebackHp) return false;
+        // Two-player extra: at the winner's lowest moment, the other player
+        // must have been at full HP. min_hp_when_others_at_max[winnerIdx]
+        // captures "lowest winner HP while ALL others were at max HP".
+        if (riggedSettings.loserMustHaveMaxHp && playersData.length === 2) {
+            const loserMaxMoment = result.minHpWhenOthersAtMax ? result.minHpWhenOthersAtMax[result.winnerIdx] : undefined;
+            if (typeof loserMaxMoment !== 'number') return false;
+            if (loserMaxMoment > riggedSettings.comebackHp) return false;
+        }
     }
     return true;
 }
@@ -1959,6 +2104,7 @@ window.onload = async () => {
     document.getElementById('cancel-rigged-btn').addEventListener('click', () => closeRiggedModal(false));
     document.getElementById('rg-comeback').addEventListener('change', (e) => {
         document.getElementById('rg-comeback-group').classList.toggle('hidden', !e.target.checked);
+        applyLoserMaxRowVisibility();
     });
     wireRangeNumberPair('rg-comeback-hp', 'rg-comeback-hp-num', { integer: true });
     document.getElementById('cancel-sim-btn').addEventListener('click', () => { simulationCancelled = true; });
@@ -1969,6 +2115,12 @@ window.onload = async () => {
     wireRangeNumberPair('uniq-speed', 'uniq-speed-num');
     document.getElementById('uniq-save-btn').addEventListener('click', () => closeUniqueModal(true));
     document.getElementById('uniq-cancel-btn').addEventListener('click', () => closeUniqueModal(false));
+    document.getElementById('uniq-reset-btn').addEventListener('click', () => {
+        // Reset to the default per-player settings without closing the modal.
+        setRangeAndNumber('uniq-hp', 'uniq-hp-num', 5, { integer: true });
+        setRangeAndNumber('uniq-size', 'uniq-size-num', 1.0);
+        setRangeAndNumber('uniq-speed', 'uniq-speed-num', 1.0);
+    });
 
     // Arena enhancement (experimental).
     const arenaEnhCb = document.getElementById('arena-enhanced-checkbox');
