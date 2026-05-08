@@ -1021,6 +1021,13 @@ function updateGameStep(headless) {
     }
     game_frame++;
 
+    // Snapshot alive state at the start of the frame. After damage logic we
+    // diff against this to detect deaths THIS frame and emit confetti at the
+    // exact moment a ball dies (instead of all-at-once on game-over, which
+    // looked wrong with N>=3 because long-dead balls spurted confetti at the
+    // end of the match).
+    const wasAliveBefore = headless ? null : players.map(p => p.hp > 0);
+
     // Arena shrinkage (driven by frame counter — deterministic).
     if (game_frame < shrink_duration_frames) {
         current_arena_size = initial_arena_width - (total_shrink * (game_frame / shrink_duration_frames));
@@ -1093,6 +1100,23 @@ function updateGameStep(headless) {
         }
     }
 
+    // Death confetti — emit at the moment of death, not retroactively at
+    // game-over. The last death (or any death that ends the match) gets
+    // FULL intensity (500 particles); earlier deaths during a multi-player
+    // game get HALF intensity (250 particles + smaller max size).
+    if (!headless && wasAliveBefore) {
+        const aliveAfter = players.filter(p => p.hp > 0).length;
+        const isFinalFrame = aliveAfter <= 1;
+        for (let i = 0; i < players.length; i++) {
+            if (!wasAliveBefore[i]) continue;
+            if (players[i].hp > 0) continue;
+            const colors = Array.from({ length: 10 }, () => `rgb(${50 + Math.random() * 205}, ${50 + Math.random() * 205}, ${50 + Math.random() * 205})`);
+            const count = isFinalFrame ? 500 : 250;
+            const sizeMax = isFinalFrame ? 12 : 8;
+            particles_list.push(new Particle(players[i].pos.x, players[i].pos.y, colors, count, 3, 10, 0.05, [80, 150], [2, sizeMax]));
+        }
+    }
+
     // Powerup spawn (saw / heart). One of each on the map at most, like the original game.
     if (!saw_on_map) {
         saw_spawn_timer--;
@@ -1158,18 +1182,13 @@ function updateGameStep(headless) {
     }
 
     // Win condition: only one player with hp > 0 (or all dead — last killed wins).
+    // No retroactive loser-confetti loop here: each death already emitted its
+    // own burst above, with the final death(s) at full intensity.
     const alive = players.filter(p => p.hp > 0);
     if (alive.length <= 1 && !game_over) {
         game_over = true;
         gameOverTime = Date.now();
         winner = alive[0] || players.reduce((a, b) => (a.min_hp_seen >= b.min_hp_seen ? a : b));
-        if (!headless) {
-            for (const loser of players) {
-                if (loser === winner) continue;
-                const colors = Array.from({ length: 10 }, () => `rgb(${50 + Math.random() * 205}, ${50 + Math.random() * 205}, ${50 + Math.random() * 205})`);
-                particles_list.push(new Particle(loser.pos.x, loser.pos.y, colors, 500, 3, 10, 0.05, [80, 150], [2, 12]));
-            }
-        }
     }
 }
 
