@@ -215,10 +215,24 @@
         </div>
         <div class="main-buttons" style="margin-top: 8px;">
             <button id="share-btn" type="button">Поделиться</button>
+            <button id="load-share-btn" type="button">Загрузить файл</button>
             <button id="clear-settings-btn" type="button" class="danger">Очистить</button>
         </div>
+        <input type="file" id="load-share-input" accept=".bbsave,.json,application/json" class="hidden">
         <div id="start-error"></div>
         <p id="loading-status" class="info hidden">Загрузка ресурсов...</p>
+    </div>
+</div>
+
+<!-- Share modal (link / bundle file) -->
+<div id="share-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3>Поделиться</h3>
+        <button id="share-link-btn" type="button" style="margin-top: 8px;">Скопировать ссылку</button>
+        <p style="font-size: 12px; color: #aaa; margin: 4px 0 12px;">Только настройки и сид. Получателю нужно положить фото/звуки/видео по тем же путям и перевыбрать их у себя.</p>
+        <button id="share-file-btn" type="button">Сохранить файл со всеми ассетами</button>
+        <p style="font-size: 12px; color: #aaa; margin: 4px 0 12px;">Один <code>.bbsave</code>-файл с настройками + всеми ассетами. Получатель открывает через «Загрузить файл» — настройки и все фото/звуки/видео применяются автоматически.</p>
+        <button id="close-share-modal-btn" type="button" style="margin-top: 12px;">Закрыть</button>
     </div>
 </div>
 
@@ -1769,11 +1783,55 @@ function utf8ToBase64(str) {
 function base64ToUtf8(str) {
     return decodeURIComponent(escape(atob(str)));
 }
-function buildShareUrl() {
+function bytesToBase64Url(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function base64UrlToBytes(b64url) {
+    let b64 = String(b64url).replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+}
+// Gzip via the built-in CompressionStream API (Chrome 80+/FF 113+/Safari 16.4+).
+// Fallback: plain utf8-base64 (still works, just longer).
+async function compressJsonToBase64Url(json) {
+    if (typeof CompressionStream === 'undefined') {
+        return 'p:' + utf8ToBase64(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+    const buf = await new Response(stream).arrayBuffer();
+    return 'g:' + bytesToBase64Url(new Uint8Array(buf));
+}
+async function decompressBase64UrlToJson(payload) {
+    if (typeof payload !== 'string' || payload.length === 0) return null;
+    if (payload.startsWith('g:')) {
+        if (typeof DecompressionStream === 'undefined') return null;
+        const bytes = base64UrlToBytes(payload.slice(2));
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+        return await new Response(stream).text();
+    }
+    if (payload.startsWith('p:')) {
+        const bytes = base64UrlToBytes(payload.slice(2));
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return decodeURIComponent(escape(binary));
+    }
+    // Backwards compat: pre-existing share links used straight utf8-base64 in
+    // ?share=... (no prefix). Try that.
+    try { return base64ToUtf8(payload); } catch (e) { return null; }
+}
+async function buildShareUrl() {
     const cfg = buildShareConfig();
     const json = JSON.stringify(cfg);
-    const encoded = utf8ToBase64(json);
-    return location.origin + location.pathname + '?share=' + encoded;
+    const encoded = await compressJsonToBase64Url(json);
+    // Use hash fragment so the URL works even when the page is loaded behind a
+    // proxy like htmlpreview.github.io that uses ?<github-url> for routing.
+    // location.search is preserved verbatim.
+    return location.origin + location.pathname + (location.search || '') + '#share=' + encoded;
 }
 function applyImportedConfig(cfg) {
     if (!cfg || typeof cfg !== 'object') return;
@@ -1833,20 +1891,142 @@ function applyImportedConfig(cfg) {
     const teamCb = document.getElementById('team-mode-checkbox');
     if (teamCb) teamCb.checked = !!teamMode;
 }
-function tryImportFromShareUrl() {
-    const params = new URLSearchParams(location.search);
-    const enc = params.get('share');
+async function tryImportFromShareUrl() {
+    // Prefer hash fragment (works behind htmlpreview.github.io and similar
+    // proxies). Fall back to ?share= for old links.
+    const hash = (location.hash || '').replace(/^#/, '');
+    const hashParams = new URLSearchParams(hash);
+    const queryParams = new URLSearchParams(location.search);
+    const enc = hashParams.get('share') || queryParams.get('share');
     if (!enc) return;
     let cfg;
     try {
-        const json = base64ToUtf8(enc);
+        const json = await decompressBase64UrlToJson(enc);
+        if (!json) throw new Error('empty payload');
         cfg = JSON.parse(json);
     } catch (e) {
-        console.warn('Не удалось распаковать ?share=', e);
+        console.warn('Не удалось распаковать share=', e);
         return;
     }
+    await applyImportedConfigAndAssets(cfg);
+    if (typeof renderPlayersGrid === 'function') renderPlayersGrid();
+    if (typeof applySettingsToSliders === 'function') applySettingsToSliders();
+    if (typeof updateRiggedWinnerOptions === 'function') updateRiggedWinnerOptions();
+}
+
+// === Bundle file (save / load with embedded assets) =======================
+async function fileToBase64(file) {
+    if (!file) return null;
+    const buf = await file.arrayBuffer();
+    return bytesToBase64Url(new Uint8Array(buf));
+}
+function base64UrlToBlob(b64url, mime) {
+    if (!b64url) return null;
+    const bytes = base64UrlToBytes(b64url);
+    return new Blob([bytes], { type: mime || 'application/octet-stream' });
+}
+async function buildBundleConfig() {
+    const cfg = buildShareConfig();
+    cfg.bundle = true;
+    // Photos already exist as base64 data URLs (`imageDataUrl`) when the user
+    // picked a file. URL-mode photos stay as `imageUrl`.
+    for (let i = 0; i < playersData.length; i++) {
+        const d = playersData[i];
+        const out = cfg.players[i];
+        out.imageDataUrl = d.imageDataUrl || '';
+        out.attackSoundData = await fileToBase64(d.attackSoundFile);
+        out.attackSoundType = d.attackSoundFile ? d.attackSoundFile.type : '';
+        out.damageSoundData = await fileToBase64(d.damageSoundFile);
+        out.damageSoundType = d.damageSoundFile ? d.damageSoundFile.type : '';
+        out.heartSoundData  = await fileToBase64(d.heartSoundFile);
+        out.heartSoundType  = d.heartSoundFile ? d.heartSoundFile.type : '';
+        out.swingSoundData  = await fileToBase64(d.swingSoundFile);
+        out.swingSoundType  = d.swingSoundFile ? d.swingSoundFile.type : '';
+        out.deathSoundData  = await fileToBase64(d.deathSoundFile);
+        out.deathSoundType  = d.deathSoundFile ? d.deathSoundFile.type : '';
+    }
+    if (arenaBg.imageFile) {
+        cfg.arenaBg.imageData = await fileToBase64(arenaBg.imageFile);
+        cfg.arenaBg.imageType = arenaBg.imageFile.type;
+    }
+    if (arenaBg.videoFile) {
+        cfg.arenaBg.videoData = await fileToBase64(arenaBg.videoFile);
+        cfg.arenaBg.videoType = arenaBg.videoFile.type;
+    }
+    return cfg;
+}
+async function downloadShareBundle() {
+    const cfg = await buildBundleConfig();
+    const json = JSON.stringify(cfg);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'balls-battle.bbsave';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+// Decode embedded asset blobs and attach them to playersData / arenaBg.
+async function applyImportedConfigAndAssets(cfg) {
     applyImportedConfig(cfg);
-    // Refresh UI to reflect imported values.
+    if (!Array.isArray(cfg.players)) return;
+    if (!audioCtx) {
+        try { audioCtx = new AudioContext(); } catch (e) {}
+    }
+    for (let i = 0; i < cfg.players.length; i++) {
+        const p = cfg.players[i];
+        const d = playersData[i];
+        if (!d) continue;
+        if (p.imageDataUrl) {
+            d.imageDataUrl = p.imageDataUrl;
+            d.imageUrl = '';
+        }
+        const restoreSound = async (key, b64, type, fname) => {
+            if (!b64) return;
+            const blob = base64UrlToBlob(b64, type);
+            if (!blob) return;
+            const file = new File([blob], fname || `${key}.audio`, { type: type || 'application/octet-stream' });
+            d[`${key}SoundFile`] = file;
+            if (audioCtx) {
+                try {
+                    const buf = await blob.arrayBuffer();
+                    d[`${key}SoundBuffer`] = await audioCtx.decodeAudioData(buf);
+                } catch (e) { console.warn(`Не удалось декодировать ${key}-звук`, e); }
+            }
+        };
+        await restoreSound('attack', p.attackSoundData, p.attackSoundType, p.attackSoundFileName);
+        await restoreSound('damage', p.damageSoundData, p.damageSoundType, p.damageSoundFileName);
+        await restoreSound('heart',  p.heartSoundData,  p.heartSoundType,  p.heartSoundFileName);
+        await restoreSound('swing',  p.swingSoundData,  p.swingSoundType,  p.swingSoundFileName);
+        await restoreSound('death',  p.deathSoundData,  p.deathSoundType,  p.deathSoundFileName);
+    }
+    if (cfg.arenaBg) {
+        if (cfg.arenaBg.imageData) {
+            const blob = base64UrlToBlob(cfg.arenaBg.imageData, cfg.arenaBg.imageType);
+            if (blob) {
+                arenaBg.imageFile = new File([blob], cfg.arenaBg.imageFileName || 'bg-image', { type: cfg.arenaBg.imageType });
+                if (arenaBg.imageObjectUrl) URL.revokeObjectURL(arenaBg.imageObjectUrl);
+                arenaBg.imageObjectUrl = URL.createObjectURL(blob);
+            }
+        }
+        if (cfg.arenaBg.videoData) {
+            const blob = base64UrlToBlob(cfg.arenaBg.videoData, cfg.arenaBg.videoType);
+            if (blob) {
+                arenaBg.videoFile = new File([blob], cfg.arenaBg.videoFileName || 'bg-video', { type: cfg.arenaBg.videoType });
+                if (arenaBg.videoObjectUrl) URL.revokeObjectURL(arenaBg.videoObjectUrl);
+                arenaBg.videoObjectUrl = URL.createObjectURL(blob);
+            }
+        }
+    }
+    // Refresh photo previews now that imageDataUrl is set.
+    playersData.forEach((_, i) => refreshPlayerPreview(i));
+}
+async function loadShareBundleFromFile(file) {
+    const text = await file.text();
+    const cfg = JSON.parse(text);
+    await applyImportedConfigAndAssets(cfg);
     if (typeof renderPlayersGrid === 'function') renderPlayersGrid();
     if (typeof applySettingsToSliders === 'function') applySettingsToSliders();
     if (typeof updateRiggedWinnerOptions === 'function') updateRiggedWinnerOptions();
@@ -2999,28 +3179,62 @@ window.onload = async () => {
         clearAllSettingsToDefault();
     });
 
-    // "Поделиться" — serialize current config into a base64 ?share=... URL and
-    // copy it to the clipboard.
-    document.getElementById('share-btn').addEventListener('click', async () => {
-        const url = buildShareUrl();
+    // "Поделиться" — opens a small modal with two options:
+    //  • Скопировать ссылку — gzip+base64 URL with config+seed (no files)
+    //  • Сохранить файл — single .bbsave file with config + embedded assets
+    const shareModal = document.getElementById('share-modal');
+    document.getElementById('share-btn').addEventListener('click', () => {
+        shareModal.classList.remove('hidden');
+    });
+    document.getElementById('close-share-modal-btn').addEventListener('click', () => {
+        shareModal.classList.add('hidden');
+    });
+    document.getElementById('share-link-btn').addEventListener('click', async () => {
+        const url = await buildShareUrl();
+        shareModal.classList.add('hidden');
         let copied = false;
         try {
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 await navigator.clipboard.writeText(url);
                 copied = true;
             }
-        } catch (e) { /* fall through to prompt */ }
-        if (!copied) {
-            // Fallback for older browsers — show prompt so user can copy manually.
-            window.prompt('Скопируй ссылку:', url);
-        } else {
-            window.alert('Ссылка скопирована в буфер обмена. Передай её другу — у него откроется тот же матч (фото и звуки нужно положить на тех же путях).');
+        } catch (e) { /* fall through */ }
+        if (!copied) window.prompt('Скопируй ссылку:', url);
+        else window.alert('Ссылка скопирована в буфер обмена. У получателя файлы (фото/звуки/видео) должны быть по тем же путям — иначе используй «Сохранить файл со всеми ассетами».');
+    });
+    document.getElementById('share-file-btn').addEventListener('click', async () => {
+        try {
+            await downloadShareBundle();
+            shareModal.classList.add('hidden');
+        } catch (e) {
+            console.error(e);
+            window.alert('Не удалось сохранить файл: ' + (e && e.message ? e.message : e));
         }
     });
 
-    // If the page was opened with ?share=..., decode and apply settings now,
-    // before anything user-driven happens. Files (photos / sounds / video bg)
-    // can't be reconstructed from a URL — those fields stay empty.
+    // "Загрузить файл" — open file picker, parse .bbsave, apply config + assets.
+    const loadShareInput = document.getElementById('load-share-input');
+    document.getElementById('load-share-btn').addEventListener('click', () => loadShareInput.click());
+    loadShareInput.addEventListener('change', async () => {
+        const f = loadShareInput.files && loadShareInput.files[0];
+        if (!f) return;
+        try {
+            if (!audioCtx) audioCtx = new AudioContext();
+            if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
+            await loadShareBundleFromFile(f);
+            window.alert('Файл загружен. Все настройки и ассеты применены.');
+        } catch (e) {
+            console.error(e);
+            window.alert('Не удалось открыть файл: ' + (e && e.message ? e.message : e));
+        } finally {
+            loadShareInput.value = '';
+        }
+    });
+
+    // If the page was opened with #share=... (or legacy ?share=...), decode
+    // and apply settings now, before anything user-driven happens. Hash form
+    // is preferred because it survives reverse-proxy hosting like
+    // htmlpreview.github.io which uses ?<github-url> for routing.
     tryImportFromShareUrl();
 
     document.getElementById('start-game-btn').addEventListener('click', async () => {
