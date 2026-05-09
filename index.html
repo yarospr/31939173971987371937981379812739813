@@ -133,6 +133,10 @@
         .range-row .range-value-input.invalid { border-color: var(--danger-color); color: var(--danger-color); }
         #start-error { color: var(--danger-color); font-weight: 600; margin-top: 10px; min-height: 1.2em; }
 
+        .bg-type-options { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 6px; margin-bottom: 16px; }
+        .bg-type-options label { display: inline-flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; color: var(--primary-text); font-size: 14px; }
+        .bg-type-options input[type="radio"] { width: auto; cursor: pointer; }
+
         .sound-section { border-top: 1px solid var(--border-color); padding-top: 15px; margin-top: 20px; }
         .sound-section h4 { margin: 0 0 12px 0; color: var(--accent-color); font-size: 16px; }
         .sound-row { margin-bottom: 16px; padding: 10px; background-color: rgba(0,0,0,0.15); border-radius: 6px; }
@@ -264,6 +268,18 @@
                     <label for="modal-p-damage-mix">Проигрывать вместе с системным</label>
                 </div>
             </div>
+            <div class="sound-row">
+                <label>Звук подбирания сердечка:</label>
+                <div class="sound-controls">
+                    <input type="file" id="modal-p-heart-sound" accept="audio/*" style="flex:1;">
+                    <button type="button" id="modal-p-heart-sound-clear" class="danger">Удалить</button>
+                </div>
+                <div class="sound-meta" id="modal-p-heart-sound-meta">Файл не выбран</div>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="modal-p-heart-mix">
+                    <label for="modal-p-heart-mix">Проигрывать вместе с системным</label>
+                </div>
+            </div>
         </div>
         <button id="close-player-modal-btn" style="margin-top: 20px;">Готово</button>
     </div>
@@ -273,19 +289,34 @@
 <div id="arena-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <h3>Настройки Арены</h3>
-        <div class="toggle-container">
-            <span>Сплошной цвет</span>
-            <label class="switch">
-                <input type="checkbox" id="bg-type-toggle">
-                <span class="slider"></span>
-            </label>
-            <span>Градиент</span>
+        <div class="form-group" style="margin-bottom: 0;">
+            <label>Тип фона:</label>
+            <div class="bg-type-options">
+                <label><input type="radio" name="bg-type" value="solid" checked> Сплошной цвет</label>
+                <label><input type="radio" name="bg-type" value="gradient"> Градиент</label>
+                <label><input type="radio" name="bg-type" value="image"> Изображение</label>
+                <label><input type="radio" name="bg-type" value="video"> Видео</label>
+            </div>
         </div>
         <div id="solid-color-group" class="form-group"><label for="bg-color">Цвет фона:</label><input type="color" id="bg-color" value="#0a0a0a"></div>
         <div id="gradient-color-group" class="form-group hidden">
             <div class="color-group">
                 <div><label for="bg-gradient-1">Цвет 1:</label><input type="color" id="bg-gradient-1" value="#1f0033"></div>
                 <div><label for="bg-gradient-2">Цвет 2:</label><input type="color" id="bg-gradient-2" value="#002e4d"></div>
+            </div>
+        </div>
+        <div id="bg-image-group" class="form-group hidden">
+            <label for="bg-image-file">Файл изображения:</label>
+            <input type="file" id="bg-image-file" accept="image/*">
+            <div class="sound-meta" id="bg-image-meta">Файл не выбран.</div>
+        </div>
+        <div id="bg-video-group" class="form-group hidden">
+            <label for="bg-video-file">Файл видео:</label>
+            <input type="file" id="bg-video-file" accept="video/*">
+            <div class="sound-meta" id="bg-video-meta">Файл не выбран.</div>
+            <div class="checkbox-row">
+                <input type="checkbox" id="bg-video-sound">
+                <label for="bg-video-sound">Проигрывать со звуком</label>
             </div>
         </div>
         <div class="checkbox-row" style="margin-top: 8px;">
@@ -425,6 +456,13 @@ const FPS = 60, MAX_HP = 5;
 // Fixed-step physics; renderer runs at native display refresh.
 const PHYSICS_STEP_MS = 1000 / FPS;
 let physics_accumulator = 0;
+// Replay state — captured at every startGame so the "Повторить игру"
+// button can re-run the exact same match. Cleared on return to main menu.
+let lastGameParams = null;
+// Loop epoch — incremented on each startGame so a stale game_loop chain
+// (e.g. one scheduled before the user clicked replay) exits cleanly
+// instead of double-feeding the physics accumulator.
+let game_loop_epoch = 0;
 
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
@@ -451,6 +489,23 @@ function clearGameSeed() { gameRng = Math.random; }
 function rng() { return gameRng(); }
 
 let allSounds = {}, backgroundSettings = {};
+// Persistent UI state for the arena background — survives modal close/reopen.
+// Image/video files are kept as both File objects (so the meta line can
+// re-show the file name) and Object URLs (so replays can re-attach without
+// re-decoding).
+let arenaBg = {
+    type: 'solid',
+    solidColor: '#0a0a0a',
+    gradient1: '#1f0033',
+    gradient2: '#002e4d',
+    imageFile: null,
+    imageObjectUrl: '',
+    videoFile: null,
+    videoObjectUrl: '',
+    videoWithSound: false
+};
+let bgImageEl = null; // hidden Image used for `type:'image'` backgrounds
+let bgVideoEl = null; // hidden HTMLVideoElement used for `type:'video'` backgrounds
 let raw_saw_img, raw_heart_img;
 // players[] holds active Ball instances during a game
 let players = [];
@@ -502,7 +557,8 @@ let arenaEnhanced = false;
 let tapTimestamps = [];
 let endGameBtnTimer = null;
 
-const mainMenuButton = { rect: { x: 0, y: 0, width: 280, height: 60 }, text: "В главное меню", visible: false, alpha: 0 };
+const mainMenuButton = { rect: { x: 0, y: 0, width: 280, height: 60 }, text: "В главное меню", visible: false, alpha: 0, fill: "#008c9e", stroke: "#00bcd4" };
+const replayButton   = { rect: { x: 0, y: 0, width: 280, height: 60 }, text: "Повторить игру",   visible: false, alpha: 0, fill: "#1b7a32", stroke: "#28a745" };
 
 const PRESET_COLORS = {
     "Красный": "#DC3232", "Оранжевый": "#FF8C00", "Желтый": "#FFD700", "Зеленый": "#32CD32",
@@ -780,9 +836,16 @@ function playSoundForPlayer(kind, player) {
         } else if (kind === 'damage') {
             customBuffer = cfg.damageSoundBuffer;
             mixWithSystem = !!cfg.damageMixWithSystem;
+        } else if (kind === 'heart') {
+            customBuffer = cfg.heartSoundBuffer;
+            mixWithSystem = !!cfg.heartMixWithSystem;
         }
     }
-    const systemKey = (kind === 'attack') ? 'sword_out' : 'sword_hit';
+    let systemKey;
+    if (kind === 'attack') systemKey = 'sword_out';
+    else if (kind === 'damage') systemKey = 'sword_hit';
+    else if (kind === 'heart') systemKey = 'pop';
+    else systemKey = null;
     if (customBuffer) {
         playBuffer(customBuffer);
         if (mixWithSystem) playSound(systemKey);
@@ -810,7 +873,49 @@ function decodeAudioFile(file) {
 }
 
 // --- ОСНОВНЫЕ ИГРОВЫЕ ФУНКЦИИ ---
-function drawBackground(surface) { if (backgroundSettings.type === 'solid') { surface.fillStyle = backgroundSettings.color1; surface.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT); } else { const gradient = surface.createLinearGradient(0, 0, 0, SCREEN_HEIGHT); gradient.addColorStop(0, backgroundSettings.color1); gradient.addColorStop(1, backgroundSettings.color2); surface.fillStyle = gradient; surface.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT); } }
+function drawBackground(surface) {
+    const t = backgroundSettings.type;
+    if (t === 'solid') {
+        surface.fillStyle = backgroundSettings.color1;
+        surface.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    } else if (t === 'gradient') {
+        const gradient = surface.createLinearGradient(0, 0, 0, SCREEN_HEIGHT);
+        gradient.addColorStop(0, backgroundSettings.color1);
+        gradient.addColorStop(1, backgroundSettings.color2);
+        surface.fillStyle = gradient;
+        surface.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    } else if (t === 'image' && bgImageEl && bgImageEl.naturalWidth > 0) {
+        surface.fillStyle = '#000';
+        surface.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+        drawCoverMedia(surface, bgImageEl, bgImageEl.naturalWidth, bgImageEl.naturalHeight);
+    } else if (t === 'video' && bgVideoEl && bgVideoEl.videoWidth > 0) {
+        surface.fillStyle = '#000';
+        surface.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+        drawCoverMedia(surface, bgVideoEl, bgVideoEl.videoWidth, bgVideoEl.videoHeight);
+    } else {
+        surface.fillStyle = '#000';
+        surface.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    }
+}
+// "Cover" fit: fill the canvas without distortion, cropping the long edge.
+function drawCoverMedia(surface, media, mw, mh) {
+    if (!mw || !mh) return;
+    const aspect = mw / mh;
+    const screenAspect = SCREEN_WIDTH / SCREEN_HEIGHT;
+    let w, h, x, y;
+    if (aspect > screenAspect) {
+        h = SCREEN_HEIGHT;
+        w = h * aspect;
+        x = (SCREEN_WIDTH - w) / 2;
+        y = 0;
+    } else {
+        w = SCREEN_WIDTH;
+        h = w / aspect;
+        x = 0;
+        y = (SCREEN_HEIGHT - h) / 2;
+    }
+    surface.drawImage(media, x, y, w, h);
+}
 // HP UI layout — adapts to N players. Returns the bottom-most y used so the arena can sit below.
 let __ui_bottom_y = 280;
 function draw_ui(surface, balls) {
@@ -893,23 +998,25 @@ function draw_ui(surface, balls) {
     }
     __ui_bottom_y = top_y + n * slot_h + 20;
 }
-function drawMainMenuButton(surface) {
-    if (!mainMenuButton.visible) return;
-    if (mainMenuButton.alpha < 1) mainMenuButton.alpha += 0.02;
+function drawCanvasButton(surface, btn) {
+    if (!btn.visible) return;
+    if (btn.alpha < 1) btn.alpha += 0.02;
     surface.save();
-    surface.globalAlpha = mainMenuButton.alpha;
-    surface.fillStyle = "#008c9e";
-    surface.strokeStyle = "#00bcd4";
+    surface.globalAlpha = btn.alpha;
+    surface.fillStyle = btn.fill;
+    surface.strokeStyle = btn.stroke;
     surface.lineWidth = 2;
-    surface.fillRect(mainMenuButton.rect.x, mainMenuButton.rect.y, mainMenuButton.rect.width, mainMenuButton.rect.height);
-    surface.strokeRect(mainMenuButton.rect.x, mainMenuButton.rect.y, mainMenuButton.rect.width, mainMenuButton.rect.height);
+    surface.fillRect(btn.rect.x, btn.rect.y, btn.rect.width, btn.rect.height);
+    surface.strokeRect(btn.rect.x, btn.rect.y, btn.rect.width, btn.rect.height);
     surface.fillStyle = WHITE;
     surface.font = "bold 24px Arial";
     surface.textAlign = "center";
     surface.textBaseline = "middle";
-    surface.fillText(mainMenuButton.text, mainMenuButton.rect.x + mainMenuButton.rect.width / 2, mainMenuButton.rect.y + mainMenuButton.rect.height / 2);
+    surface.fillText(btn.text, btn.rect.x + btn.rect.width / 2, btn.rect.y + btn.rect.height / 2);
     surface.restore();
 }
+function drawMainMenuButton(surface) { drawCanvasButton(surface, mainMenuButton); }
+function drawReplayButton(surface)   { drawCanvasButton(surface, replayButton); }
 
 let initial_arena_width, final_arena_width, total_shrink, shrink_duration_frames;
 let current_arena_size, arena_y_offset, arena_center_pos, arena;
@@ -980,6 +1087,8 @@ function initGameState(playerConfigs, images, screenW, screenH, headless) {
     screen_shake = 0;
     mainMenuButton.visible = false;
     mainMenuButton.alpha = 0;
+    replayButton.visible = false;
+    replayButton.alpha = 0;
 
     const positions = getInitialPositions(n, arena_center_pos.x, arena_center_pos.y, initial_arena_width / 2);
     players = [];
@@ -1151,7 +1260,7 @@ function updateGameStep(headless) {
                 saw_on_map = false;
             } else if (pup.type === 'heart') {
                 p.update_hp(1);
-                if (!headless) playSound('pop');
+                if (!headless) playSoundForPlayer('heart', p);
                 heart_on_map = false;
             }
             return false; // remove powerup
@@ -1192,9 +1301,10 @@ function updateGameStep(headless) {
     }
 }
 
-function game_loop(timestamp) {
+function game_loop(timestamp, my_epoch) {
     if (!running) return;
-    requestAnimationFrame(game_loop);
+    if (typeof my_epoch === 'number' && my_epoch !== game_loop_epoch) return;
+    requestAnimationFrame((ts) => game_loop(ts, my_epoch));
 
     // Decouple physics (fixed 60Hz) from rendering (display refresh, e.g. 120Hz).
     if (last_time === 0) last_time = timestamp;
@@ -1213,6 +1323,7 @@ function game_loop(timestamp) {
         particles_list = particles_list.filter(p => p.particles.length > 0);
         if (game_over && gameOverTime && Date.now() - gameOverTime > 4000) {
             mainMenuButton.visible = true;
+            replayButton.visible = true;
         }
     }
 
@@ -1245,6 +1356,7 @@ function game_loop(timestamp) {
 
     ctx.restore();
     draw_ui(ctx, players);
+    drawReplayButton(ctx);
     drawMainMenuButton(ctx);
 }
 
@@ -1259,12 +1371,24 @@ function resetToMainMenu() {
     players = [];
     mainMenuButton.visible = false;
     mainMenuButton.alpha = 0;
+    replayButton.visible = false;
+    replayButton.alpha = 0;
+    teardownBackgroundMedia();
+    lastGameParams = null;
     tapTimestamps = [];
     const endBtn = document.getElementById('end-game-btn');
     if (endBtn) endBtn.classList.remove('shown');
     if (endGameBtnTimer) { clearTimeout(endGameBtnTimer); endGameBtnTimer = null; }
     clearGameSeed();
     renderPlayersGrid();
+}
+
+// Replay the most recent match — same configs, same RNG seed.
+// Bumping game_loop_epoch in startGame ensures the in-flight loop exits.
+function replayLastGame() {
+    if (!lastGameParams) return;
+    const { playerDataList, bg_settings, seed } = lastGameParams;
+    startGame(playerDataList, bg_settings, { seed });
 }
 
 // Run a fully headless simulation with the given seed; return outcome metadata.
@@ -1304,27 +1428,70 @@ function startGame(playerDataList, bg_settings, options) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
 
-    if (bg_settings.type === 'solid') {
-        document.body.style.backgroundColor = bg_settings.color1;
-    } else {
-        document.body.style.background = `linear-gradient(to bottom, ${bg_settings.color1}, ${bg_settings.color2})`;
-    }
+    setupBackgroundForGame(bg_settings);
     backgroundSettings = bg_settings;
 
-    if (typeof options.seed === 'number') {
-        setGameSeed(options.seed);
-    } else {
-        clearGameSeed();
-    }
+    // Always seed so replay can reproduce the match exactly. For non-rigged
+    // games we generate a fresh uint32 seed when one wasn't passed in.
+    const effectiveSeed = (typeof options.seed === 'number')
+        ? options.seed
+        : ((Math.random() * 0xFFFFFFFF) >>> 0);
+    setGameSeed(effectiveSeed);
+    lastGameParams = { playerDataList, bg_settings, seed: effectiveSeed };
 
     const images = playerDataList.map(p => p.image);
     initGameState(playerDataList, images, SCREEN_WIDTH, SCREEN_HEIGHT, false);
 
     mainMenuButton.rect.x = (SCREEN_WIDTH - mainMenuButton.rect.width) / 2;
     mainMenuButton.rect.y = SCREEN_HEIGHT - mainMenuButton.rect.height - 40;
+    replayButton.rect.x = (SCREEN_WIDTH - replayButton.rect.width) / 2;
+    replayButton.rect.y = mainMenuButton.rect.y - mainMenuButton.rect.height - 12;
+
+    physics_accumulator = 0;
     last_time = 0;
     running = true;
-    requestAnimationFrame(game_loop);
+    game_loop_epoch++;
+    const my_epoch = game_loop_epoch;
+    requestAnimationFrame((ts) => game_loop(ts, my_epoch));
+}
+
+// Set up the body background (CSS still affects DOM beyond the canvas) and
+// prepare hidden <img>/<video> elements for image/video backgrounds.
+function setupBackgroundForGame(bg) {
+    document.body.style.background = '';
+    document.body.style.backgroundColor = 'var(--bg-color)';
+
+    teardownBackgroundMedia();
+
+    if (!bg) return;
+    if (bg.type === 'solid') {
+        document.body.style.backgroundColor = bg.color1;
+    } else if (bg.type === 'gradient') {
+        document.body.style.background = `linear-gradient(to bottom, ${bg.color1}, ${bg.color2})`;
+    } else if (bg.type === 'image' && bg.imageUrl) {
+        const img = new Image();
+        img.src = bg.imageUrl;
+        bgImageEl = img;
+    } else if (bg.type === 'video' && bg.videoUrl) {
+        const v = document.createElement('video');
+        v.src = bg.videoUrl;
+        v.loop = true;
+        v.muted = !bg.withSound;
+        v.playsInline = true;
+        v.autoplay = true;
+        v.style.display = 'none';
+        document.body.appendChild(v);
+        v.play().catch(() => {});
+        bgVideoEl = v;
+    }
+}
+function teardownBackgroundMedia() {
+    if (bgVideoEl) {
+        try { bgVideoEl.pause(); } catch (e) {}
+        if (bgVideoEl.parentNode) bgVideoEl.parentNode.removeChild(bgVideoEl);
+        bgVideoEl = null;
+    }
+    bgImageEl = null;
 }
 
 // --- ЛОГИКА НАСТРОЙКИ И ПРЕДПРОСМОТРА ---
@@ -1349,7 +1516,10 @@ function makeDefaultPlayer(idx) {
         attackMixWithSystem: false,
         damageSoundFile: null,
         damageSoundBuffer: null,
-        damageMixWithSystem: false
+        damageMixWithSystem: false,
+        heartSoundFile: null,
+        heartSoundBuffer: null,
+        heartMixWithSystem: false
     };
 }
 
@@ -1522,6 +1692,9 @@ function openPlayerModal(idx) {
     document.getElementById('modal-p-damage-sound').value = '';
     document.getElementById('modal-p-damage-sound-meta').textContent = data.damageSoundFile ? `Файл: ${data.damageSoundFile.name}` : 'Файл не выбран';
     document.getElementById('modal-p-damage-mix').checked = !!data.damageMixWithSystem;
+    document.getElementById('modal-p-heart-sound').value = '';
+    document.getElementById('modal-p-heart-sound-meta').textContent = data.heartSoundFile ? `Файл: ${data.heartSoundFile.name}` : 'Файл не выбран';
+    document.getElementById('modal-p-heart-mix').checked = !!data.heartMixWithSystem;
 
     document.getElementById('player-modal').classList.remove('hidden');
 }
@@ -1564,8 +1737,10 @@ async function saveAndClosePlayerModal() {
 
     data.attackMixWithSystem = document.getElementById('modal-p-attack-mix').checked;
     data.damageMixWithSystem = document.getElementById('modal-p-damage-mix').checked;
+    data.heartMixWithSystem = document.getElementById('modal-p-heart-mix').checked;
     const attackFile = document.getElementById('modal-p-attack-sound').files[0];
     const damageFile = document.getElementById('modal-p-damage-sound').files[0];
+    const heartFile  = document.getElementById('modal-p-heart-sound').files[0];
     if (attackFile) {
         if (!audioCtx) audioCtx = new AudioContext();
         if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
@@ -1577,6 +1752,12 @@ async function saveAndClosePlayerModal() {
         if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
         data.damageSoundFile = damageFile;
         data.damageSoundBuffer = await decodeAudioFile(damageFile);
+    }
+    if (heartFile) {
+        if (!audioCtx) audioCtx = new AudioContext();
+        if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
+        data.heartSoundFile = heartFile;
+        data.heartSoundBuffer = await decodeAudioFile(heartFile);
     }
 
     document.getElementById('player-modal').classList.add('hidden');
@@ -2037,6 +2218,66 @@ async function ensurePlayerAvatars() {
     }
 }
 
+// --- Arena background modal helpers ---
+function applyBgTypeUI() {
+    const sel = document.querySelector('input[name="bg-type"]:checked');
+    const t = sel ? sel.value : 'solid';
+    document.getElementById('solid-color-group').classList.toggle('hidden', t !== 'solid');
+    document.getElementById('gradient-color-group').classList.toggle('hidden', t !== 'gradient');
+    document.getElementById('bg-image-group').classList.toggle('hidden', t !== 'image');
+    document.getElementById('bg-video-group').classList.toggle('hidden', t !== 'video');
+}
+function openArenaModal() {
+    for (const r of document.getElementsByName('bg-type')) r.checked = (r.value === arenaBg.type);
+    document.getElementById('bg-color').value = arenaBg.solidColor;
+    document.getElementById('bg-gradient-1').value = arenaBg.gradient1;
+    document.getElementById('bg-gradient-2').value = arenaBg.gradient2;
+    document.getElementById('bg-image-file').value = '';
+    document.getElementById('bg-video-file').value = '';
+    document.getElementById('bg-image-meta').textContent = arenaBg.imageFile ? `Файл: ${arenaBg.imageFile.name}` : 'Файл не выбран.';
+    document.getElementById('bg-video-meta').textContent = arenaBg.videoFile ? `Файл: ${arenaBg.videoFile.name}` : 'Файл не выбран.';
+    document.getElementById('bg-video-sound').checked = !!arenaBg.videoWithSound;
+    applyBgTypeUI();
+    document.getElementById('arena-modal').classList.remove('hidden');
+}
+function closeArenaModal() {
+    const sel = document.querySelector('input[name="bg-type"]:checked');
+    arenaBg.type = sel ? sel.value : 'solid';
+    arenaBg.solidColor = document.getElementById('bg-color').value;
+    arenaBg.gradient1 = document.getElementById('bg-gradient-1').value;
+    arenaBg.gradient2 = document.getElementById('bg-gradient-2').value;
+    arenaBg.videoWithSound = document.getElementById('bg-video-sound').checked;
+
+    const imgFile = document.getElementById('bg-image-file').files[0];
+    if (imgFile) {
+        if (arenaBg.imageObjectUrl) { try { URL.revokeObjectURL(arenaBg.imageObjectUrl); } catch (e) {} }
+        arenaBg.imageFile = imgFile;
+        arenaBg.imageObjectUrl = URL.createObjectURL(imgFile);
+    }
+    const vidFile = document.getElementById('bg-video-file').files[0];
+    if (vidFile) {
+        if (arenaBg.videoObjectUrl) { try { URL.revokeObjectURL(arenaBg.videoObjectUrl); } catch (e) {} }
+        arenaBg.videoFile = vidFile;
+        arenaBg.videoObjectUrl = URL.createObjectURL(vidFile);
+    }
+    document.getElementById('arena-modal').classList.add('hidden');
+}
+function buildBgSettingsForGame() {
+    const out = { type: arenaBg.type };
+    if (arenaBg.type === 'solid') {
+        out.color1 = arenaBg.solidColor;
+    } else if (arenaBg.type === 'gradient') {
+        out.color1 = arenaBg.gradient1;
+        out.color2 = arenaBg.gradient2;
+    } else if (arenaBg.type === 'image') {
+        out.imageUrl = arenaBg.imageObjectUrl || '';
+    } else if (arenaBg.type === 'video') {
+        out.videoUrl = arenaBg.videoObjectUrl || '';
+        out.withSound = !!arenaBg.videoWithSound;
+    }
+    return out;
+}
+
 async function handleStartGame() {
     const status = document.getElementById('loading-status');
     showStartError('');
@@ -2049,14 +2290,7 @@ async function handleStartGame() {
 
     status.classList.remove('hidden');
     try {
-        const bgToggle = document.getElementById('bg-type-toggle');
-        const bg_settings = { type: bgToggle.checked ? 'gradient' : 'solid' };
-        if (bg_settings.type === 'solid') {
-            bg_settings.color1 = document.getElementById('bg-color').value;
-        } else {
-            bg_settings.color1 = document.getElementById('bg-gradient-1').value;
-            bg_settings.color2 = document.getElementById('bg-gradient-2').value;
-        }
+        const bg_settings = buildBgSettingsForGame();
 
         await loadGameAssets();
         await ensurePlayerAvatars();
@@ -2082,7 +2316,6 @@ window.onload = async () => {
     const arenaModal = document.getElementById('arena-modal');
     const gameSettingsModal = document.getElementById('game-settings-modal');
     const riggedModal = document.getElementById('rigged-modal');
-    const bgToggle = document.getElementById('bg-type-toggle');
     const avatarToggle = document.getElementById('avatar-source-toggle');
     playerModal.classList.add('hidden');
     arenaModal.classList.add('hidden');
@@ -2099,8 +2332,19 @@ window.onload = async () => {
     document.getElementById('add-player-btn').addEventListener('click', addPlayer);
     document.getElementById('remove-player-btn').addEventListener('click', removeLastPlayer);
 
-    document.getElementById('arena-settings-btn').addEventListener('click', () => arenaModal.classList.remove('hidden'));
-    document.getElementById('close-arena-modal-btn').addEventListener('click', () => arenaModal.classList.add('hidden'));
+    document.getElementById('arena-settings-btn').addEventListener('click', openArenaModal);
+    document.getElementById('close-arena-modal-btn').addEventListener('click', closeArenaModal);
+    for (const r of document.getElementsByName('bg-type')) {
+        r.addEventListener('change', applyBgTypeUI);
+    }
+    document.getElementById('bg-image-file').addEventListener('change', () => {
+        const f = document.getElementById('bg-image-file').files[0];
+        document.getElementById('bg-image-meta').textContent = f ? `Файл: ${f.name}` : 'Файл не выбран.';
+    });
+    document.getElementById('bg-video-file').addEventListener('change', () => {
+        const f = document.getElementById('bg-video-file').files[0];
+        document.getElementById('bg-video-meta').textContent = f ? `Файл: ${f.name}` : 'Файл не выбран.';
+    });
 
     document.getElementById('close-player-modal-btn').addEventListener('click', () => { saveAndClosePlayerModal(); });
     document.getElementById('open-unique-modal-btn').addEventListener('click', () => { openUniqueModalForCurrentPlayer(); });
@@ -2187,14 +2431,11 @@ window.onload = async () => {
         document.getElementById('avatar-url-group').classList.toggle('hidden', avatarToggle.checked);
         document.getElementById('avatar-file-group').classList.toggle('hidden', !avatarToggle.checked);
     });
-    bgToggle.addEventListener('change', () => {
-        document.getElementById('solid-color-group').classList.toggle('hidden', bgToggle.checked);
-        document.getElementById('gradient-color-group').classList.toggle('hidden', !bgToggle.checked);
-    });
 
     // Sound clear buttons + meta updates inside the player modal.
     const attackInput = document.getElementById('modal-p-attack-sound');
     const damageInput = document.getElementById('modal-p-damage-sound');
+    const heartInput  = document.getElementById('modal-p-heart-sound');
     attackInput.addEventListener('change', () => {
         const f = attackInput.files[0];
         document.getElementById('modal-p-attack-sound-meta').textContent = f ? `Файл: ${f.name}` : 'Файл не выбран';
@@ -2202,6 +2443,10 @@ window.onload = async () => {
     damageInput.addEventListener('change', () => {
         const f = damageInput.files[0];
         document.getElementById('modal-p-damage-sound-meta').textContent = f ? `Файл: ${f.name}` : 'Файл не выбран';
+    });
+    heartInput.addEventListener('change', () => {
+        const f = heartInput.files[0];
+        document.getElementById('modal-p-heart-sound-meta').textContent = f ? `Файл: ${f.name}` : 'Файл не выбран';
     });
     document.getElementById('modal-p-attack-sound-clear').addEventListener('click', () => {
         if (currentPlayerEditing === null) return;
@@ -2221,6 +2466,15 @@ window.onload = async () => {
         document.getElementById('modal-p-damage-sound').value = '';
         document.getElementById('modal-p-damage-sound-meta').textContent = 'Файл не выбран';
     });
+    document.getElementById('modal-p-heart-sound-clear').addEventListener('click', () => {
+        if (currentPlayerEditing === null) return;
+        const data = playersData[currentPlayerEditing];
+        if (!data) return;
+        data.heartSoundFile = null;
+        data.heartSoundBuffer = null;
+        document.getElementById('modal-p-heart-sound').value = '';
+        document.getElementById('modal-p-heart-sound-meta').textContent = 'Файл не выбран';
+    });
 
     const presetsContainer = document.getElementById('modal-p-color-presets');
     const modalColorPicker = document.getElementById('modal-p-color');
@@ -2234,20 +2488,28 @@ window.onload = async () => {
     }
 
     canvas.addEventListener('click', (event) => {
-        if (!mainMenuButton.visible) return;
+        if (!mainMenuButton.visible && !replayButton.visible) return;
         const rect = canvas.getBoundingClientRect();
         const mouseX = (event.clientX - rect.left);
         const mouseY = (event.clientY - rect.top);
-        if (checkCollision({x: mouseX, y: mouseY, width: 1, height: 1}, mainMenuButton.rect)) {
+        const point = { x: mouseX, y: mouseY, width: 1, height: 1 };
+        if (replayButton.visible && checkCollision(point, replayButton.rect)) {
+            replayLastGame();
+            return;
+        }
+        if (mainMenuButton.visible && checkCollision(point, mainMenuButton.rect)) {
             resetToMainMenu();
         }
     });
     canvas.addEventListener('mousemove', (event) => {
-        if (!mainMenuButton.visible) { canvas.style.cursor = 'default'; return; }
+        if (!mainMenuButton.visible && !replayButton.visible) { canvas.style.cursor = 'default'; return; }
         const rect = canvas.getBoundingClientRect();
         const mouseX = (event.clientX - rect.left);
         const mouseY = (event.clientY - rect.top);
-        canvas.style.cursor = checkCollision({x: mouseX, y: mouseY, width: 1, height: 1}, mainMenuButton.rect) ? 'pointer' : 'default';
+        const point = { x: mouseX, y: mouseY, width: 1, height: 1 };
+        const overReplay = replayButton.visible && checkCollision(point, replayButton.rect);
+        const overMenu   = mainMenuButton.visible && checkCollision(point, mainMenuButton.rect);
+        canvas.style.cursor = (overReplay || overMenu) ? 'pointer' : 'default';
     });
 
     document.getElementById('start-game-btn').addEventListener('click', async () => {
