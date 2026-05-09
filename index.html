@@ -398,6 +398,18 @@
                 <label for="modal-p-heart-mix">Проигрывать вместе с системным</label>
             </div>
         </div>
+        <div class="sound-row">
+            <label>Звук смерти шарика:</label>
+            <div class="sound-controls">
+                <input type="file" id="modal-p-death-sound" accept="audio/*" style="flex:1;">
+                <button type="button" id="modal-p-death-sound-clear" class="danger">Удалить</button>
+            </div>
+            <div class="sound-meta" id="modal-p-death-sound-meta">Файл не выбран</div>
+            <div class="checkbox-row">
+                <input type="checkbox" id="modal-p-death-mix">
+                <label for="modal-p-death-mix">Проигрывать вместе с системным</label>
+            </div>
+        </div>
         <button id="close-sounds-modal-btn" style="margin-top: 20px;">Готово</button>
     </div>
 </div>
@@ -848,6 +860,7 @@ function playSound(soundKey) {
 //   'damage' — taking damage (system: sword_hit)
 //   'heart'  — heart pickup (system: pop)
 //   'swing'  — when this player attacks another with a saw (no system fallback)
+//   'death'  — when this player's ball dies (no system fallback)
 function playSoundForPlayer(kind, player) {
     if (!player || !audioCtx || audioCtx.state === 'suspended') return;
     const idx = player.alive_index;
@@ -866,13 +879,16 @@ function playSoundForPlayer(kind, player) {
         } else if (kind === 'swing') {
             customBuffer = cfg.swingSoundBuffer;
             mixWithSystem = !!cfg.swingMixWithSystem;
+        } else if (kind === 'death') {
+            customBuffer = cfg.deathSoundBuffer;
+            mixWithSystem = !!cfg.deathMixWithSystem;
         }
     }
     let systemKey;
     if (kind === 'attack') systemKey = 'sword_out';
     else if (kind === 'damage') systemKey = 'sword_hit';
     else if (kind === 'heart') systemKey = 'pop';
-    else systemKey = null; // 'swing' has no system sound
+    else systemKey = null; // 'swing' and 'death' have no system fallback
     if (customBuffer) {
         playBuffer(customBuffer);
         if (mixWithSystem) playSound(systemKey);
@@ -1254,6 +1270,7 @@ function updateGameStep(headless) {
             const count = isFinalFrame ? 500 : 250;
             const sizeMax = isFinalFrame ? 12 : 8;
             particles_list.push(new Particle(players[i].pos.x, players[i].pos.y, colors, count, 3, 10, 0.05, [80, 150], [2, sizeMax]));
+            playSoundForPlayer('death', players[i]);
         }
     }
 
@@ -1553,7 +1570,10 @@ function makeDefaultPlayer(idx) {
         heartMixWithSystem: false,
         swingSoundFile: null,
         swingSoundBuffer: null,
-        swingMixWithSystem: false
+        swingMixWithSystem: false,
+        deathSoundFile: null,
+        deathSoundBuffer: null,
+        deathMixWithSystem: false
     };
 }
 
@@ -1742,6 +1762,9 @@ function openSoundsModalForCurrentPlayer() {
     document.getElementById('modal-p-heart-sound').value = '';
     document.getElementById('modal-p-heart-sound-meta').textContent = data.heartSoundFile ? `Файл: ${data.heartSoundFile.name}` : 'Файл не выбран';
     document.getElementById('modal-p-heart-mix').checked = !!data.heartMixWithSystem;
+    document.getElementById('modal-p-death-sound').value = '';
+    document.getElementById('modal-p-death-sound-meta').textContent = data.deathSoundFile ? `Файл: ${data.deathSoundFile.name}` : 'Файл не выбран';
+    document.getElementById('modal-p-death-mix').checked = !!data.deathMixWithSystem;
     document.getElementById('sounds-modal').classList.remove('hidden');
 }
 
@@ -1759,11 +1782,13 @@ async function saveAndCloseSoundsModal() {
     data.damageMixWithSystem = document.getElementById('modal-p-damage-mix').checked;
     data.heartMixWithSystem  = document.getElementById('modal-p-heart-mix').checked;
     data.swingMixWithSystem  = document.getElementById('modal-p-swing-mix').checked;
+    data.deathMixWithSystem  = document.getElementById('modal-p-death-mix').checked;
     const attackFile = document.getElementById('modal-p-attack-sound').files[0];
     const damageFile = document.getElementById('modal-p-damage-sound').files[0];
     const heartFile  = document.getElementById('modal-p-heart-sound').files[0];
     const swingFile  = document.getElementById('modal-p-swing-sound').files[0];
-    if (attackFile || damageFile || heartFile || swingFile) {
+    const deathFile  = document.getElementById('modal-p-death-sound').files[0];
+    if (attackFile || damageFile || heartFile || swingFile || deathFile) {
         if (!audioCtx) audioCtx = new AudioContext();
         if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
     }
@@ -1782,6 +1807,10 @@ async function saveAndCloseSoundsModal() {
     if (swingFile) {
         data.swingSoundFile = swingFile;
         data.swingSoundBuffer = await decodeAudioFile(swingFile);
+    }
+    if (deathFile) {
+        data.deathSoundFile = deathFile;
+        data.deathSoundBuffer = await decodeAudioFile(deathFile);
     }
     document.getElementById('sounds-modal').classList.add('hidden');
 }
@@ -2501,6 +2530,7 @@ window.onload = async () => {
     const damageInput = document.getElementById('modal-p-damage-sound');
     const heartInput  = document.getElementById('modal-p-heart-sound');
     const swingInput  = document.getElementById('modal-p-swing-sound');
+    const deathInput  = document.getElementById('modal-p-death-sound');
     attackInput.addEventListener('change', () => {
         const f = attackInput.files[0];
         document.getElementById('modal-p-attack-sound-meta').textContent = f ? `Файл: ${f.name}` : 'Файл не выбран';
@@ -2516,6 +2546,10 @@ window.onload = async () => {
     swingInput.addEventListener('change', () => {
         const f = swingInput.files[0];
         document.getElementById('modal-p-swing-sound-meta').textContent = f ? `Файл: ${f.name}` : 'Файл не выбран';
+    });
+    deathInput.addEventListener('change', () => {
+        const f = deathInput.files[0];
+        document.getElementById('modal-p-death-sound-meta').textContent = f ? `Файл: ${f.name}` : 'Файл не выбран';
     });
     document.getElementById('modal-p-attack-sound-clear').addEventListener('click', () => {
         if (currentPlayerEditing === null) return;
@@ -2552,6 +2586,15 @@ window.onload = async () => {
         data.swingSoundBuffer = null;
         document.getElementById('modal-p-swing-sound').value = '';
         document.getElementById('modal-p-swing-sound-meta').textContent = 'Файл не выбран';
+    });
+    document.getElementById('modal-p-death-sound-clear').addEventListener('click', () => {
+        if (currentPlayerEditing === null) return;
+        const data = playersData[currentPlayerEditing];
+        if (!data) return;
+        data.deathSoundFile = null;
+        data.deathSoundBuffer = null;
+        document.getElementById('modal-p-death-sound').value = '';
+        document.getElementById('modal-p-death-sound-meta').textContent = 'Файл не выбран';
     });
 
     const presetsContainer = document.getElementById('modal-p-color-presets');
