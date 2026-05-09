@@ -213,6 +213,10 @@
             <button id="arena-settings-btn">Настроить арену</button>
             <button id="start-game-btn">Начать игру</button>
         </div>
+        <div class="main-buttons" style="margin-top: 8px;">
+            <button id="share-btn" type="button">Поделиться</button>
+            <button id="clear-settings-btn" type="button" class="danger">Очистить</button>
+        </div>
         <div id="start-error"></div>
         <p id="loading-status" class="info hidden">Загрузка ресурсов...</p>
     </div>
@@ -240,6 +244,13 @@
             <label for="modal-p-image-file">Файл фото:</label>
             <input type="file" id="modal-p-image-file" accept="image/*">
             <div class="sound-meta" id="modal-p-image-file-meta">Файл не выбран.</div>
+        </div>
+        <div id="modal-p-team-group" class="form-group hidden" style="margin-bottom: 8px;">
+            <label for="modal-p-team-select">Команда:</label>
+            <div style="display:flex; gap:8px;">
+                <select id="modal-p-team-select" style="flex:1;"></select>
+                <button id="modal-p-add-team-btn" type="button" style="margin:0; min-width:140px;">Новая команда</button>
+            </div>
         </div>
         <div style="display:flex; flex-wrap:wrap; gap:8px; margin: 8px 0 4px;">
             <button id="open-unique-modal-btn" type="button" style="flex:1; min-width:140px; margin:0;">Уникальные настройки</button>
@@ -314,6 +325,10 @@
         <div class="range-row">
             <div class="range-header"><span class="range-name">Скорость сужения поля (×)</span><input type="number" class="range-value-input" id="gs-shrink-speed-num" step="0.05" value="1.00"></div>
             <input type="range" id="gs-shrink-speed" min="0.1" max="5" step="0.05" value="1">
+        </div>
+        <div class="checkbox-row" style="margin-top: 12px;">
+            <input type="checkbox" id="team-mode-checkbox">
+            <label for="team-mode-checkbox">Командный режим</label>
         </div>
         <div class="modal-buttons">
             <button id="reset-game-settings-btn" class="danger">Сбросить</button>
@@ -584,6 +599,20 @@ let simulationActive = false, simulationCancelled = false;
 
 // Experimental "arena enhancement" toggle — adds glow / fancier HP bars when on.
 let arenaEnhanced = false;
+
+// Team mode. When enabled: each player has a teamId pointing into teamsData[].
+// Same-team balls don't damage each other and victory is by last team standing.
+// Color is shared inside a team — changing one teammate's color updates them all.
+let teamMode = false;
+let nextTeamId = 1;
+function makeDefaultTeams() {
+    nextTeamId = 1;
+    return [
+        { id: nextTeamId++, name: 'Команда 1', color: '#DC3232' },
+        { id: nextTeamId++, name: 'Команда 2', color: '#4169E1' }
+    ];
+}
+let teamsData = makeDefaultTeams();
 
 // Triple-tap-below-arena → transient "end game" button state.
 let tapTimestamps = [];
@@ -1143,6 +1172,7 @@ function initGameState(playerConfigs, images, screenW, screenH, headless) {
         const speedMul = (cfg && typeof cfg.speed_mul === 'number') ? cfg.speed_mul : 1.0;
         const ball = new Ball(positions[i].x, positions[i].y, img, cfg.color, cfg.name, game_ball_diameter * sizeMul, headless, maxHp, speedMul);
         ball.alive_index = i;
+        ball.teamId = (cfg && cfg.team_id != null) ? cfg.team_id : null;
         players.push(ball);
     }
 }
@@ -1224,6 +1254,9 @@ function updateGameStep(headless) {
                 }
             }
             // Saw/attack damage. If both attacking, both take damage and both saws consumed.
+            // Friendly fire: in team mode, same-team balls keep their saw and don't damage each other.
+            const sameTeam = teamMode && a.teamId != null && a.teamId === b.teamId;
+            if (sameTeam) continue;
             const aAttack = a.is_attacking, bAttack = b.is_attacking;
             if (aAttack && bAttack) {
                 b.update_hp(-1); a.update_hp(-1);
@@ -1339,10 +1372,22 @@ function updateGameStep(headless) {
     }
 
     // Win condition: only one player with hp > 0 (or all dead — last killed wins).
+    // In team mode the rule is "only one team has any alive ball left" — players
+    // without a teamId count as their own one-person team.
     // No retroactive loser-confetti loop here: each death already emitted its
     // own burst above, with the final death(s) at full intensity.
     const alive = players.filter(p => p.hp > 0);
-    if (alive.length <= 1 && !game_over) {
+    let isOver;
+    if (teamMode) {
+        const aliveGroups = new Set();
+        for (const p of alive) {
+            aliveGroups.add(p.teamId == null ? `solo:${p.alive_index}` : `team:${p.teamId}`);
+        }
+        isOver = aliveGroups.size <= 1;
+    } else {
+        isOver = alive.length <= 1;
+    }
+    if (isOver && !game_over) {
         game_over = true;
         gameOverTime = Date.now();
         winner = alive[0] || players.reduce((a, b) => (a.min_hp_seen >= b.min_hp_seen ? a : b));
@@ -1573,8 +1618,238 @@ function makeDefaultPlayer(idx) {
         swingMixWithSystem: false,
         deathSoundFile: null,
         deathSoundBuffer: null,
-        deathMixWithSystem: false
+        deathMixWithSystem: false,
+        // teamId is null when team mode is off; assigned (= teamsData[i].id)
+        // when team mode is on. Default is preserved across team-mode toggles.
+        teamId: null
     };
+}
+
+// === Team helpers =========================================================
+function findTeam(id) { return teamsData.find(t => t.id === id) || null; }
+function ensureValidTeamAssignments() {
+    // After teams are deleted/loaded, drop player.teamId references that no
+    // longer point at a real team. Players keep an explicit `null` (= unassigned).
+    const validIds = new Set(teamsData.map(t => t.id));
+    for (const p of playersData) {
+        if (p.teamId != null && !validIds.has(p.teamId)) p.teamId = null;
+    }
+}
+function autoAssignTeamsForAll() {
+    // Round-robin assignment used when team mode is freshly enabled and a player
+    // has no team yet.
+    if (teamsData.length === 0) teamsData = makeDefaultTeams();
+    for (let i = 0; i < playersData.length; i++) {
+        if (playersData[i].teamId == null) {
+            playersData[i].teamId = teamsData[i % teamsData.length].id;
+        }
+    }
+    syncAllPlayersToTeamColor();
+}
+function addNewTeam() {
+    const used = new Set(teamsData.map(t => t.color));
+    const fallback = DEFAULT_PLAYER_COLORS.find(c => !used.has(c)) || '#888888';
+    const team = { id: nextTeamId++, name: `Команда ${teamsData.length + 1}`, color: fallback };
+    teamsData.push(team);
+    return team;
+}
+function syncAllPlayersToTeamColor() {
+    // For every player with a team, set color = team color.
+    for (const p of playersData) {
+        if (p.teamId == null) continue;
+        const t = findTeam(p.teamId);
+        if (t) p.color = t.color;
+    }
+}
+function setTeamColor(teamId, color) {
+    const t = findTeam(teamId);
+    if (!t) return;
+    t.color = color;
+    for (const p of playersData) {
+        if (p.teamId === teamId) p.color = color;
+    }
+}
+
+// === Clear-all-settings ===================================================
+// Resets every persistent piece of state to its default. Files (photos, sounds,
+// video bg) are dropped — the user gets a clean main menu with two default
+// players, default game/arena/rigged settings, team mode off.
+function clearAllSettingsToDefault() {
+    playersData = [makeDefaultPlayer(0), makeDefaultPlayer(1)];
+    multiPlayerMode = false;
+    teamMode = false;
+    teamsData = makeDefaultTeams();
+    gameSettings = Object.assign({}, DEFAULT_GAME_SETTINGS);
+    arenaBg = {
+        type: 'solid',
+        solidColor: '#0a0a0a',
+        gradient1: '#1f0033',
+        gradient2: '#002e4d',
+        imageFile: null,
+        imageObjectUrl: '',
+        videoFile: null,
+        videoObjectUrl: '',
+        videoWithSound: false
+    };
+    riggedSettings = {
+        enabled: false,
+        minTime: 30,
+        maxTime: 120,
+        winnerIndex: 0,
+        comeback: false,
+        comebackHp: 1,
+        loserMustHaveMaxHp: false
+    };
+    arenaEnhanced = false;
+    lastGameParams = null;
+    // Sync UI: re-render player grid, reset sliders/checkboxes, clear errors.
+    renderPlayersGrid();
+    applySettingsToSliders();
+    const teamCb = document.getElementById('team-mode-checkbox');
+    if (teamCb) teamCb.checked = false;
+    const riggedCb = document.getElementById('rigged-checkbox');
+    if (riggedCb) riggedCb.checked = false;
+    const enhCb = document.getElementById('arena-enhanced-checkbox');
+    if (enhCb) enhCb.checked = false;
+    updateRiggedWinnerOptions();
+    showStartError('');
+}
+
+// === Sharing (export / import) ===========================================
+// Build a portable, base64-encoded URL with the full setup. File-backed media
+// (photos, sounds, video) can't travel in a URL — we only carry their
+// filenames so the recipient knows what to look for, but the recipient must
+// re-pick those files themselves (browsers can't reconstruct a File from a
+// path for security reasons).
+function buildShareConfig() {
+    return {
+        v: 1,
+        multiPlayerMode: !!multiPlayerMode,
+        teamMode: !!teamMode,
+        teams: teamsData.map(t => ({ id: t.id, name: t.name, color: t.color })),
+        players: playersData.map(d => ({
+            name: d.name,
+            color: d.color,
+            imageUrl: d.imageUrl || '',
+            imageFileName: d.imageFile ? d.imageFile.name : '',
+            maxHp: parseInt(d.maxHp != null ? d.maxHp : 5, 10),
+            sizeMul: parseFloat(d.sizeMul != null ? d.sizeMul : 1),
+            speedMul: parseFloat(d.speedMul != null ? d.speedMul : 1),
+            attackSoundFileName: d.attackSoundFile ? d.attackSoundFile.name : '',
+            attackMixWithSystem: !!d.attackMixWithSystem,
+            damageSoundFileName: d.damageSoundFile ? d.damageSoundFile.name : '',
+            damageMixWithSystem: !!d.damageMixWithSystem,
+            heartSoundFileName: d.heartSoundFile ? d.heartSoundFile.name : '',
+            heartMixWithSystem: !!d.heartMixWithSystem,
+            swingSoundFileName: d.swingSoundFile ? d.swingSoundFile.name : '',
+            swingMixWithSystem: !!d.swingMixWithSystem,
+            deathSoundFileName: d.deathSoundFile ? d.deathSoundFile.name : '',
+            deathMixWithSystem: !!d.deathMixWithSystem,
+            teamId: d.teamId != null ? d.teamId : null
+        })),
+        gameSettings: Object.assign({}, gameSettings),
+        arenaBg: {
+            type: arenaBg.type,
+            solidColor: arenaBg.solidColor,
+            gradient1: arenaBg.gradient1,
+            gradient2: arenaBg.gradient2,
+            imageFileName: arenaBg.imageFile ? arenaBg.imageFile.name : '',
+            videoFileName: arenaBg.videoFile ? arenaBg.videoFile.name : '',
+            videoWithSound: !!arenaBg.videoWithSound
+        },
+        riggedSettings: Object.assign({}, riggedSettings),
+        arenaEnhanced: !!arenaEnhanced,
+        seed: (lastGameParams && typeof lastGameParams.seed === 'number') ? lastGameParams.seed : null
+    };
+}
+// utf8-safe base64 (handles cyrillic player names).
+function utf8ToBase64(str) {
+    return btoa(unescape(encodeURIComponent(str)));
+}
+function base64ToUtf8(str) {
+    return decodeURIComponent(escape(atob(str)));
+}
+function buildShareUrl() {
+    const cfg = buildShareConfig();
+    const json = JSON.stringify(cfg);
+    const encoded = utf8ToBase64(json);
+    return location.origin + location.pathname + '?share=' + encoded;
+}
+function applyImportedConfig(cfg) {
+    if (!cfg || typeof cfg !== 'object') return;
+    if (Array.isArray(cfg.teams) && cfg.teams.length) {
+        teamsData = cfg.teams.map(t => ({ id: t.id, name: t.name, color: t.color }));
+        nextTeamId = teamsData.reduce((m, t) => Math.max(m, t.id), 0) + 1;
+    }
+    if (Array.isArray(cfg.players) && cfg.players.length >= MIN_PLAYERS) {
+        playersData = cfg.players.map((p, i) => {
+            const def = makeDefaultPlayer(i);
+            def.name = p.name || def.name;
+            def.color = p.color || def.color;
+            def.imageUrl = p.imageUrl || '';
+            def.maxHp = parseInt(p.maxHp != null ? p.maxHp : def.maxHp, 10);
+            def.sizeMul = parseFloat(p.sizeMul != null ? p.sizeMul : def.sizeMul);
+            def.speedMul = parseFloat(p.speedMul != null ? p.speedMul : def.speedMul);
+            def.attackMixWithSystem = !!p.attackMixWithSystem;
+            def.damageMixWithSystem = !!p.damageMixWithSystem;
+            def.heartMixWithSystem  = !!p.heartMixWithSystem;
+            def.swingMixWithSystem  = !!p.swingMixWithSystem;
+            def.deathMixWithSystem  = !!p.deathMixWithSystem;
+            def.teamId = (p.teamId != null) ? p.teamId : null;
+            return def;
+        });
+    }
+    multiPlayerMode = !!cfg.multiPlayerMode || (playersData.length > 2);
+    teamMode = !!cfg.teamMode;
+    if (cfg.gameSettings && typeof cfg.gameSettings === 'object') {
+        gameSettings = Object.assign({}, DEFAULT_GAME_SETTINGS, cfg.gameSettings);
+    }
+    if (cfg.arenaBg && typeof cfg.arenaBg === 'object') {
+        arenaBg.type = cfg.arenaBg.type || 'solid';
+        arenaBg.solidColor = cfg.arenaBg.solidColor || arenaBg.solidColor;
+        arenaBg.gradient1 = cfg.arenaBg.gradient1 || arenaBg.gradient1;
+        arenaBg.gradient2 = cfg.arenaBg.gradient2 || arenaBg.gradient2;
+        arenaBg.videoWithSound = !!cfg.arenaBg.videoWithSound;
+        // Files can't be reconstructed from a URL — drop them. The recipient
+        // must re-pick the files locally.
+        arenaBg.imageFile = null;
+        arenaBg.imageObjectUrl = '';
+        arenaBg.videoFile = null;
+        arenaBg.videoObjectUrl = '';
+    }
+    if (cfg.riggedSettings && typeof cfg.riggedSettings === 'object') {
+        riggedSettings = Object.assign({
+            enabled: false, minTime: 30, maxTime: 120, winnerIndex: 0,
+            comeback: false, comebackHp: 1, loserMustHaveMaxHp: false
+        }, cfg.riggedSettings);
+    }
+    if (typeof cfg.arenaEnhanced === 'boolean') arenaEnhanced = cfg.arenaEnhanced;
+    ensureValidTeamAssignments();
+    // Mirror UI checkboxes that are read at game-start time.
+    const riggedCb = document.getElementById('rigged-checkbox');
+    if (riggedCb) riggedCb.checked = !!riggedSettings.enabled;
+    const enhCb = document.getElementById('arena-enhanced-checkbox');
+    if (enhCb) enhCb.checked = !!arenaEnhanced;
+    const teamCb = document.getElementById('team-mode-checkbox');
+    if (teamCb) teamCb.checked = !!teamMode;
+}
+function tryImportFromShareUrl() {
+    const params = new URLSearchParams(location.search);
+    const enc = params.get('share');
+    if (!enc) return;
+    let cfg;
+    try {
+        const json = base64ToUtf8(enc);
+        cfg = JSON.parse(json);
+    } catch (e) {
+        console.warn('Не удалось распаковать ?share=', e);
+        return;
+    }
+    applyImportedConfig(cfg);
+    // Refresh UI to reflect imported values.
+    if (typeof renderPlayersGrid === 'function') renderPlayersGrid();
+    if (typeof applySettingsToSliders === 'function') applySettingsToSliders();
+    if (typeof updateRiggedWinnerOptions === 'function') updateRiggedWinnerOptions();
 }
 
 function ensurePlayersDataInitialised() {
@@ -1739,7 +2014,29 @@ function openPlayerModal(idx) {
         }
     }
 
+    refreshTeamSelectorUI(idx);
     document.getElementById('player-modal').classList.remove('hidden');
+}
+
+function refreshTeamSelectorUI(idx) {
+    // Show / hide the team selector based on teamMode, and rebuild the
+    // <select> options each open so newly added teams show up.
+    const group = document.getElementById('modal-p-team-group');
+    if (!group) return;
+    group.classList.toggle('hidden', !teamMode);
+    if (!teamMode) return;
+    const sel = document.getElementById('modal-p-team-select');
+    sel.innerHTML = '';
+    const data = playersData[idx];
+    if (!data) return;
+    if (data.teamId == null && teamsData[0]) data.teamId = teamsData[0].id;
+    for (const t of teamsData) {
+        const opt = document.createElement('option');
+        opt.value = String(t.id);
+        opt.textContent = t.name;
+        if (t.id === data.teamId) opt.selected = true;
+        sel.appendChild(opt);
+    }
 }
 
 function openSoundsModalForCurrentPlayer() {
@@ -1827,7 +2124,24 @@ async function saveAndClosePlayerModal() {
     if (!data) { document.getElementById('player-modal').classList.add('hidden'); currentPlayerEditing = null; return; }
 
     data.name = document.getElementById('modal-p-name').value || `Игрок ${idx + 1}`;
-    data.color = document.getElementById('modal-p-color').value;
+    const newColor = document.getElementById('modal-p-color').value;
+    if (teamMode) {
+        // Read team selection first.
+        const sel = document.getElementById('modal-p-team-select');
+        const newTeamId = sel ? parseInt(sel.value, 10) : NaN;
+        if (Number.isFinite(newTeamId) && findTeam(newTeamId)) data.teamId = newTeamId;
+        if (data.teamId == null && teamsData[0]) data.teamId = teamsData[0].id;
+        // If user changed the picker color, propagate it across the whole team
+        // (and update player.color via setTeamColor).
+        const team = findTeam(data.teamId);
+        if (team && newColor && newColor.toLowerCase() !== team.color.toLowerCase()) {
+            setTeamColor(data.teamId, newColor);
+        } else if (team) {
+            data.color = team.color;
+        }
+    } else {
+        data.color = newColor;
+    }
     const useFile = document.getElementById('avatar-source-toggle').checked;
     const fileInput = document.getElementById('modal-p-image-file');
     const urlInput = document.getElementById('modal-p-image-url');
@@ -2045,6 +2359,7 @@ function buildPlayerConfigsForGame() {
         max_hp: parseInt(d.maxHp != null ? d.maxHp : 5, 10),
         size_mul: parseFloat(d.sizeMul != null ? d.sizeMul : 1),
         speed_mul: parseFloat(d.speedMul != null ? d.speedMul : 1),
+        team_id: d.teamId != null ? d.teamId : null,
         index: i
     }));
 }
@@ -2632,6 +2947,81 @@ window.onload = async () => {
         const overMenu   = mainMenuButton.visible && checkCollision(point, mainMenuButton.rect);
         canvas.style.cursor = (overReplay || overMenu) ? 'pointer' : 'default';
     });
+
+    // Team mode checkbox: toggles teamMode, auto-assigns teams round-robin and
+    // syncs colors when enabled. Disabling preserves teamId so re-enabling
+    // restores the previous setup.
+    const teamCb = document.getElementById('team-mode-checkbox');
+    teamCb.checked = !!teamMode;
+    teamCb.addEventListener('change', () => {
+        teamMode = !!teamCb.checked;
+        if (teamMode) {
+            if (teamsData.length === 0) teamsData = makeDefaultTeams();
+            autoAssignTeamsForAll();
+        }
+        renderPlayersGrid();
+        updateRiggedWinnerOptions();
+    });
+
+    // Live color sync inside the player modal — when team mode is on, picking
+    // a different team auto-fills the color picker; picking a different color
+    // updates the team color and all teammates' previews instantly.
+    const teamSel = document.getElementById('modal-p-team-select');
+    if (teamSel) {
+        teamSel.addEventListener('change', () => {
+            const id = parseInt(teamSel.value, 10);
+            const t = findTeam(id);
+            if (t) document.getElementById('modal-p-color').value = t.color;
+        });
+    }
+    document.getElementById('modal-p-color').addEventListener('input', () => {
+        if (!teamMode || currentPlayerEditing === null) return;
+        const data = playersData[currentPlayerEditing];
+        if (!data || data.teamId == null) return;
+        const newColor = document.getElementById('modal-p-color').value;
+        setTeamColor(data.teamId, newColor);
+        // Refresh peer previews so the user sees the team color spread instantly.
+        playersData.forEach((_, i) => { if (i !== currentPlayerEditing) refreshPlayerPreview(i); });
+    });
+    document.getElementById('modal-p-add-team-btn').addEventListener('click', () => {
+        if (!teamMode || currentPlayerEditing === null) return;
+        const team = addNewTeam();
+        playersData[currentPlayerEditing].teamId = team.id;
+        refreshTeamSelectorUI(currentPlayerEditing);
+        document.getElementById('modal-p-color').value = team.color;
+    });
+
+    // Clear-all-settings button on the main menu. Resets every persistent piece
+    // of state to its default, but keeps the user on the main menu.
+    document.getElementById('clear-settings-btn').addEventListener('click', () => {
+        const ok = window.confirm('Удалить все настройки игроков, игры, арены и постановки? Отменить будет нельзя.');
+        if (!ok) return;
+        clearAllSettingsToDefault();
+    });
+
+    // "Поделиться" — serialize current config into a base64 ?share=... URL and
+    // copy it to the clipboard.
+    document.getElementById('share-btn').addEventListener('click', async () => {
+        const url = buildShareUrl();
+        let copied = false;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(url);
+                copied = true;
+            }
+        } catch (e) { /* fall through to prompt */ }
+        if (!copied) {
+            // Fallback for older browsers — show prompt so user can copy manually.
+            window.prompt('Скопируй ссылку:', url);
+        } else {
+            window.alert('Ссылка скопирована в буфер обмена. Передай её другу — у него откроется тот же матч (фото и звуки нужно положить на тех же путях).');
+        }
+    });
+
+    // If the page was opened with ?share=..., decode and apply settings now,
+    // before anything user-driven happens. Files (photos / sounds / video bg)
+    // can't be reconstructed from a URL — those fields stay empty.
+    tryImportFromShareUrl();
 
     document.getElementById('start-game-btn').addEventListener('click', async () => {
         if (!audioCtx) audioCtx = new AudioContext();
