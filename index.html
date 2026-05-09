@@ -266,6 +266,10 @@
                 <button id="modal-p-add-team-btn" type="button" style="margin:0; min-width:140px;">Новая команда</button>
             </div>
         </div>
+        <div class="checkbox-row" style="margin: 8px 0;">
+            <input type="checkbox" id="modal-p-no-outline">
+            <label for="modal-p-no-outline">Без обводки (только круглое фото)</label>
+        </div>
         <div style="display:flex; flex-wrap:wrap; gap:8px; margin: 8px 0 4px;">
             <button id="open-unique-modal-btn" type="button" style="flex:1; min-width:140px; margin:0;">Уникальные настройки</button>
             <button id="open-sounds-modal-btn" type="button" style="flex:1; min-width:140px; margin:0;">Уникальные звуки</button>
@@ -646,7 +650,7 @@ class Vector2 { constructor(x = 0, y = 0) { this.x = x; this.y = y; } add(v) { r
 class Particle { constructor(x, y, colors, count, min_speed, max_speed, gravity, lifetime_range, size_range) { this.particles = []; for (let i = 0; i < count; i++) { const angle = Math.random() * 2 * Math.PI; const speed = min_speed + Math.random() * (max_speed - min_speed); this.particles.push({ pos: new Vector2(x, y), vel: new Vector2(Math.cos(angle) * speed, Math.sin(angle) * speed), life: lifetime_range[0] + Math.random() * (lifetime_range[1] - lifetime_range[0]), max_life: lifetime_range[1], color: colors[Math.floor(Math.random() * colors.length)], size: size_range[0] + Math.random() * (size_range[1] - size_range[0]) }); } this.gravity = gravity; } update() { for (const p of this.particles) { p.pos = p.pos.add(p.vel); p.vel.y += this.gravity; p.life -= 1; } this.particles = this.particles.filter(p => p.life > 0); } draw(surface) { surface.globalCompositeOperation = 'lighter'; for (const p of this.particles) { const alpha = p.life / p.max_life; if (alpha <= 0) continue; const size = p.size * alpha; if (size < 1) continue; surface.fillStyle = p.color; surface.globalAlpha = alpha; surface.beginPath(); surface.arc(p.pos.x, p.pos.y, size, 0, 2 * Math.PI); surface.fill(); } surface.globalAlpha = 1.0; surface.globalCompositeOperation = 'source-over'; } }
 class PowerUp { constructor(x, y, type) { this.type = type; const size = this.type === 'heart' ? 35 : 40; this.rect = { x: x, y: y, width: size, height: size }; this.image = type === 'saw' ? raw_saw_img : raw_heart_img; this.angle = 0; this.pulse_phase = 0; this.pulse_timer = Math.floor(Math.random() * 45); } update() { if (this.type === 'saw') { this.angle -= 12; } else { this.pulse_timer -= 1; if (this.pulse_timer <= 0) { this.pulse_timer = 0.75 * FPS; if (this.pulse_phase <= 0) this.pulse_phase = Math.PI; } if (this.pulse_phase > 0) { this.pulse_phase -= 0.4; } } } draw(surface) { const centerX = this.rect.x + this.rect.width / 2; const centerY = this.rect.y + this.rect.height / 2; if (this.type === 'saw') { surface.save(); surface.translate(centerX, centerY); surface.rotate(this.angle * Math.PI / 180); surface.drawImage(this.image, -this.rect.width / 2, -this.rect.height / 2, this.rect.width, this.rect.height); surface.restore(); } else { let scale = 1.0; if (this.pulse_phase > 0) { scale = 1.0 + 0.25 * Math.sin(this.pulse_phase); } const w = this.rect.width * scale; const h = this.rect.height * scale; surface.drawImage(this.image, centerX - w / 2, centerY - h / 2, w, h); } } }
 class Ball {
-    constructor(x, y, base_image, color, name, initial_diameter, headless, max_hp, speed_mul) {
+    constructor(x, y, base_image, color, name, initial_diameter, headless, max_hp, speed_mul, no_outline) {
         this.pos = new Vector2(x, y);
         this.speed_mul = (typeof speed_mul === 'number' && isFinite(speed_mul)) ? Math.max(0.1, speed_mul) : 1.0;
         const speedMul = gameSettings.ballSpeed * this.speed_mul;
@@ -668,6 +672,7 @@ class Ball {
         this.current_scale = 1.0;
         this.target_scale = 1.0;
         this.image = null;
+        this.no_outline = !!no_outline;
         this.headless = !!headless;
         this.alive_index = 0; // assigned externally
         // Always set radius (collisions / wall bounds rely on it, even in headless mode).
@@ -683,19 +688,29 @@ class Ball {
         const ballCtx = ballCanvas.getContext('2d');
         ballCtx.scale(dpr, dpr);
 
-        ballCtx.beginPath();
-        ballCtx.arc(this.radius, this.radius, this.radius, 0, 2 * Math.PI);
-        ballCtx.fillStyle = this.color;
-        ballCtx.fill();
-        const border_thickness = diameter * 0.12;
-        const inner_radius = this.radius - border_thickness;
-        if (this.base_image && inner_radius >= 1) {
+        if (this.no_outline && this.base_image) {
+            // Photo-only mode: clip a circle and paint the photo at full diameter.
             ballCtx.save();
             ballCtx.beginPath();
-            ballCtx.arc(this.radius, this.radius, inner_radius, 0, 2 * Math.PI);
+            ballCtx.arc(this.radius, this.radius, this.radius, 0, 2 * Math.PI);
             ballCtx.clip();
-            ballCtx.drawImage(this.base_image, border_thickness, border_thickness, inner_radius * 2, inner_radius * 2);
+            ballCtx.drawImage(this.base_image, 0, 0, this.radius * 2, this.radius * 2);
             ballCtx.restore();
+        } else {
+            ballCtx.beginPath();
+            ballCtx.arc(this.radius, this.radius, this.radius, 0, 2 * Math.PI);
+            ballCtx.fillStyle = this.color;
+            ballCtx.fill();
+            const border_thickness = diameter * 0.12;
+            const inner_radius = this.radius - border_thickness;
+            if (this.base_image && inner_radius >= 1) {
+                ballCtx.save();
+                ballCtx.beginPath();
+                ballCtx.arc(this.radius, this.radius, inner_radius, 0, 2 * Math.PI);
+                ballCtx.clip();
+                ballCtx.drawImage(this.base_image, border_thickness, border_thickness, inner_radius * 2, inner_radius * 2);
+                ballCtx.restore();
+            }
         }
         this.image = ballCanvas;
     }
@@ -1615,6 +1630,10 @@ function makeDefaultPlayer(idx) {
         // close, page state changes, and stale File references on mobile.
         imageDataUrl: '',
         previewImage: null,
+        // When true, render only a circular crop of the photo at full diameter
+        // (no colored ring around it). Same overall ball size either way, so
+        // collisions and physics are unaffected.
+        noOutline: false,
         maxHp: 5,
         sizeMul: 1.0,
         speedMul: 1.0,
@@ -1749,6 +1768,7 @@ function buildShareConfig() {
             maxHp: parseInt(d.maxHp != null ? d.maxHp : 5, 10),
             sizeMul: parseFloat(d.sizeMul != null ? d.sizeMul : 1),
             speedMul: parseFloat(d.speedMul != null ? d.speedMul : 1),
+            noOutline: !!d.noOutline,
             attackSoundFileName: d.attackSoundFile ? d.attackSoundFile.name : '',
             attackMixWithSystem: !!d.attackMixWithSystem,
             damageSoundFileName: d.damageSoundFile ? d.damageSoundFile.name : '',
@@ -1848,6 +1868,7 @@ function applyImportedConfig(cfg) {
             def.maxHp = parseInt(p.maxHp != null ? p.maxHp : def.maxHp, 10);
             def.sizeMul = parseFloat(p.sizeMul != null ? p.sizeMul : def.sizeMul);
             def.speedMul = parseFloat(p.speedMul != null ? p.speedMul : def.speedMul);
+            def.noOutline = !!p.noOutline;
             def.attackMixWithSystem = !!p.attackMixWithSystem;
             def.damageMixWithSystem = !!p.damageMixWithSystem;
             def.heartMixWithSystem  = !!p.heartMixWithSystem;
@@ -2038,7 +2059,7 @@ function ensurePlayersDataInitialised() {
     }
 }
 
-function drawPreviewBallOnCanvas(canvas, color, name, avatar) {
+function drawPreviewBallOnCanvas(canvas, color, name, avatar, noOutline) {
     const ctx2 = canvas.getContext('2d');
     const cssWidth = parseInt(canvas.style.width, 10);
     const cssHeight = parseInt(canvas.style.height, 10);
@@ -2054,6 +2075,16 @@ function drawPreviewBallOnCanvas(canvas, color, name, avatar) {
     ctx2.textAlign = "center";
     ctx2.textBaseline = "bottom";
     ctx2.fillText(name, centerX, 32);
+
+    if (noOutline && avatar) {
+        ctx2.save();
+        ctx2.beginPath();
+        ctx2.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+        ctx2.clip();
+        ctx2.drawImage(avatar, centerX - radius, centerY - radius, radius * 2, radius * 2);
+        ctx2.restore();
+        return;
+    }
 
     ctx2.beginPath();
     ctx2.arc(centerX, centerY, radius, 0, 2 * Math.PI);
@@ -2080,7 +2111,7 @@ async function refreshPlayerPreview(idx) {
     const newImage = await getImage(url ? null : data.imageFile, url, data.color);
     data.previewImage = newImage;
     const canvas = document.getElementById(`player-preview-canvas-${idx}`);
-    if (canvas) drawPreviewBallOnCanvas(canvas, data.color, data.name, data.previewImage);
+    if (canvas) drawPreviewBallOnCanvas(canvas, data.color, data.name, data.previewImage, !!data.noOutline);
 }
 
 function renderPlayersGrid() {
@@ -2177,6 +2208,8 @@ function openPlayerModal(idx) {
     document.getElementById('modal-p-color').value = data.color;
     document.getElementById('modal-p-image-url').value = data.imageUrl || '';
     document.getElementById('modal-p-image-file').value = '';
+    const noOutlineCb = document.getElementById('modal-p-no-outline');
+    if (noOutlineCb) noOutlineCb.checked = !!data.noOutline;
 
     // File mode is shown if either a picked-file data URL is cached OR no http URL.
     const useFile = !!data.imageDataUrl || !data.imageUrl;
@@ -2322,6 +2355,8 @@ async function saveAndClosePlayerModal() {
     } else {
         data.color = newColor;
     }
+    const noOutlineCb = document.getElementById('modal-p-no-outline');
+    if (noOutlineCb) data.noOutline = !!noOutlineCb.checked;
     const useFile = document.getElementById('avatar-source-toggle').checked;
     const fileInput = document.getElementById('modal-p-image-file');
     const urlInput = document.getElementById('modal-p-image-url');
@@ -2540,6 +2575,7 @@ function buildPlayerConfigsForGame() {
         size_mul: parseFloat(d.sizeMul != null ? d.sizeMul : 1),
         speed_mul: parseFloat(d.speedMul != null ? d.speedMul : 1),
         team_id: d.teamId != null ? d.teamId : null,
+        no_outline: !!d.noOutline,
         index: i
     }));
 }
@@ -2569,6 +2605,20 @@ function validateBeforeStart() {
         if (!Number.isFinite(sz) || sz <= 0) issues.push(`${label}: множитель размера должен быть больше 0.`);
         if (!Number.isFinite(sp) || sp <= 0) issues.push(`${label}: множитель скорости должен быть больше 0.`);
     });
+
+    // Team mode: need at least 2 distinct teams represented among the players.
+    // If everyone is on the same team and friendly fire is off, the win
+    // condition (`only one team has any alive ball`) is true on frame 1,
+    // freezing all the losers in place — that's the "ball doesn't move" bug.
+    if (teamMode) {
+        const teamGroups = new Set();
+        for (const d of playersData) {
+            teamGroups.add(d.teamId == null ? `solo:${d.name}` : `team:${d.teamId}`);
+        }
+        if (teamGroups.size < 2) {
+            issues.push('В командном режиме нужно минимум 2 команды с игроками (сейчас все в одной).');
+        }
+    }
 
     // Geometry: ball must fit inside the arena.
     const screenW = Math.min(window.innerWidth, MAX_GAME_WIDTH);
